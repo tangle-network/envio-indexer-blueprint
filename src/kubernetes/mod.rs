@@ -53,6 +53,14 @@ impl K8sManager {
         Self { client, namespace }
     }
 
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     pub fn service<T: ServiceSpec>(&self) -> ServiceManager<T>
     where
         <T as Resource>::DynamicType: Default,

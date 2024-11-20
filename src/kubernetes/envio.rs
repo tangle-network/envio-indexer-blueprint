@@ -14,9 +14,7 @@ use serde::{Deserialize, Serialize};
     namespaced
 )]
 pub struct EnvioIndexerSpec {
-    pub spec: EnvioIndexerConfig,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<ServiceStatus>,
+    pub config: EnvioIndexerConfig,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -27,13 +25,13 @@ pub struct EnvioIndexerConfig {
     pub rpc_url: Option<String>,
 }
 
-impl ServiceSpec for EnvioIndexerSpec {
+impl ServiceSpec for EnvioIndexer {
     fn get_name(&self) -> String {
-        self.spec.name.clone()
+        self.spec.config.name.clone()
     }
 
     fn to_deployment_config(&self, namespace: &str) -> DeploymentConfig {
-        create_envio_deployment_config(&self.spec, namespace)
+        create_envio_deployment_config(&self.spec.config, namespace)
     }
 
     fn status(&self) -> Option<&ServiceStatus> {

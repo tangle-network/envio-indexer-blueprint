@@ -42,26 +42,35 @@ pub async fn spawn_indexer(params: Vec<u8>, context: ServiceContext) -> Result<V
         }
         DeploymentMode::Kubernetes => {
             // Create EnvioIndexer CRD
-            let indexer = EnvioIndexerSpec {
-                spec: EnvioIndexerConfig {
-                    name: params.config.name,
-                    abi: params.config.abi,
-                    blockchain: params.blockchain,
-                    rpc_url: params.rpc_url,
+            let indexer = EnvioIndexer {
+                metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+                    name: Some(params.config.name.clone()),
+                    namespace: context
+                        .k8s_manager
+                        .clone()
+                        .map(|m| m.namespace().to_string()),
+                    ..Default::default()
+                },
+                spec: EnvioIndexerSpec {
+                    config: EnvioIndexerConfig {
+                        name: params.config.name,
+                        abi: params.config.abi,
+                        blockchain: params.blockchain,
+                        rpc_url: params.rpc_url,
+                    },
                 },
                 status: Some(ServiceStatus {
                     phase: ServicePhase::Starting,
                     message: Some("Indexer starting".to_string()),
-                    last_updated: Some(TimeWrapper(Time(chrono::Utc::now().into()))),
+                    last_updated: Some(TimeWrapper(Time(chrono::Utc::now()))),
                 }),
             };
 
             // Deploy using K8s manager
-            // In the Kubernetes deployment block
             let manager = context
                 .k8s_manager
                 .ok_or_else(|| "K8s manager not initialized".to_string())?
-                .service::<EnvioIndexerSpec>();
+                .service::<EnvioIndexer>();
 
             let result = manager.create(&indexer).await.map_err(|e| e.to_string())?;
             serde_json::to_vec(&result)

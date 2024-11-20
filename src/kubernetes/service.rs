@@ -26,28 +26,6 @@ impl JsonSchema for TimeWrapper {
     }
 }
 
-mod time_serde {
-    use super::*;
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S>(time: &TimeWrapper, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        time.0 .0.to_rfc3339().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<TimeWrapper, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let time_str = String::deserialize(deserializer)?;
-        let dt =
-            chrono::DateTime::parse_from_rfc3339(&time_str).map_err(serde::de::Error::custom)?;
-        Ok(TimeWrapper(Time(dt.with_timezone(&chrono::Utc))))
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ServiceStatus {
     pub phase: ServicePhase,
