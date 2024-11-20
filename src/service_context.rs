@@ -1,18 +1,41 @@
 use envio::{EnvioManager, EnvioProject};
 use gadget_sdk::config::StdGadgetConfiguration;
+use schemars::JsonSchema;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::RwLock;
 
-use crate::{envio, generator, indexer_utils};
+use crate::{envio, kubernetes::K8sManager};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexerConfig {
+    pub name: String,
+    pub abi: String,
+}
+
+impl IndexerConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.is_empty() {
+            return Err("Indexer name cannot be empty".to_string());
+        }
+        if self.abi.is_empty() {
+            return Err("Contract ABI cannot be empty".to_string());
+        }
+        // Validate ABI is valid JSON
+        serde_json::from_str::<serde_json::Value>(&self.abi)
+            .map_err(|e| format!("Invalid ABI JSON: {}", e))?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SpawnIndexerParams {
-    /// The indexer configuration containing contract and event details
-    pub config: indexer_utils::IndexerConfig,
+    pub config: IndexerConfig,
+    pub blockchain: String,
+    pub rpc_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -25,13 +48,13 @@ pub struct SpawnIndexerResult {
 
 pub struct IndexerProcess {
     pub id: String,
-    pub config: indexer_utils::IndexerConfig,
+    pub config: IndexerConfig,
     pub output_dir: PathBuf,
     pub process: Option<Child>,
     pub status: IndexerStatus,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum IndexerStatus {
     Configured,
     Starting,
@@ -40,11 +63,19 @@ pub enum IndexerStatus {
     Stopped,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DeploymentMode {
+    Local,
+    Kubernetes,
+}
+
 #[derive(Clone)]
 pub struct ServiceContext {
     pub config: StdGadgetConfiguration,
     pub indexers: Arc<RwLock<HashMap<String, IndexerProcess>>>,
-    envio_manager: Arc<EnvioManager>,
+    pub envio_manager: Arc<EnvioManager>,
+    pub deployment_mode: DeploymentMode,
+    pub k8s_manager: Option<K8sManager>,
 }
 
 impl ServiceContext {
@@ -53,10 +84,12 @@ impl ServiceContext {
             config,
             indexers: Arc::new(RwLock::new(HashMap::new())),
             envio_manager: Arc::new(EnvioManager::new(data_dir)),
+            deployment_mode: DeploymentMode::Local,
+            k8s_manager: None,
         }
     }
 
-    fn generate_indexer_id(&self, config: &indexer_utils::IndexerConfig) -> String {
+    fn generate_indexer_id(&self, config: &IndexerConfig) -> String {
         let id = uuid::Uuid::new_v4();
         let name = config.name.to_lowercase().replace([' ', '-'], "_");
         format!("indexer_{}_{}", name, id)
@@ -64,7 +97,9 @@ impl ServiceContext {
 
     pub async fn spawn_indexer(
         &self,
-        config: indexer_utils::IndexerConfig,
+        config: IndexerConfig,
+        blockchain: String,
+        rpc_url: Option<String>,
     ) -> Result<SpawnIndexerResult, String> {
         let id = self.generate_indexer_id(&config);
         let mut indexers = self.indexers.write().await;
@@ -74,11 +109,16 @@ impl ServiceContext {
         }
 
         // Initialize envio project
-        let project = self.envio_manager.init_project(&id).await?;
-
-        // Generate files into the correct envio directory structure
-        let generator = generator::IndexerGenerator::new(&config, &project.dir);
-        generator.generate()?;
+        let project = self
+            .envio_manager
+            .init_project(
+                &id,
+                &config.abi,
+                &config.name,
+                &blockchain,
+                rpc_url.as_deref(),
+            )
+            .await?;
 
         // Create indexer process entry
         let process = IndexerProcess {
@@ -156,38 +196,11 @@ impl ServiceContext {
         Ok(process.status.clone())
     }
 
-    pub async fn get_indexer_config(
-        &self,
-        id: &str,
-    ) -> Result<indexer_utils::IndexerConfig, String> {
+    pub async fn get_indexer_config(&self, id: &str) -> Result<IndexerConfig, String> {
         let indexers = self.indexers.read().await;
         let process = indexers
             .get(id)
             .ok_or_else(|| format!("Indexer {} not found", id))?;
         Ok(process.config.clone())
-    }
-
-    pub async fn update_indexer(
-        &self,
-        id: &str,
-        new_config: indexer_utils::IndexerConfig,
-    ) -> Result<(), String> {
-        // First stop the indexer
-        self.stop_indexer(id).await?;
-
-        // Update configuration
-        let mut indexers = self.indexers.write().await;
-        let process = indexers
-            .get_mut(id)
-            .ok_or_else(|| format!("Indexer {} not found", id))?;
-
-        process.config = new_config;
-
-        // Regenerate files
-        let generator = generator::IndexerGenerator::new(&process.config, &process.output_dir);
-        generator.generate()?;
-
-        // Restart the indexer
-        self.start_indexer(id).await
     }
 }

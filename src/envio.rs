@@ -1,7 +1,5 @@
 use std::path::PathBuf;
-use std::process::Stdio;
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
 #[derive(Error, Debug)]
@@ -38,48 +36,40 @@ impl EnvioManager {
         Self { base_dir }
     }
 
-    pub async fn init_project(&self, id: &str) -> Result<EnvioProject, EnvioError> {
+    pub async fn init_project(
+        &self,
+        id: &str,
+        abi: &str,
+        contract_name: &str,
+        blockchain: &str,
+        rpc_url: Option<&str>,
+    ) -> Result<EnvioProject, EnvioError> {
         let project_dir = self.base_dir.join(id);
         std::fs::create_dir_all(&project_dir)?;
 
-        let mut child = Command::new("envio")
-            .arg("init")
-            .arg(id)
-            .current_dir(&self.base_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()?;
+        // Write ABI to a temporary file
+        let abi_path = project_dir.join("abi.json");
+        std::fs::write(&abi_path, abi)?;
 
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| EnvioError::ProcessOutput("Failed to open stdin".into()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| EnvioError::ProcessOutput("Failed to capture stdout".into()))?;
+        // Build command with required arguments
+        let mut cmd = Command::new("envio");
+        cmd.arg("init")
+            .arg("contract-import")
+            .arg("local")
+            .arg("--abi-file")
+            .arg(&abi_path)
+            .arg("--contract-name")
+            .arg(contract_name)
+            .arg("--blockchain")
+            .arg(blockchain)
+            .current_dir(&self.base_dir);
 
-        let mut reader = BufReader::new(stdout).lines();
-
-        // Handle interactive prompts
-        while let Ok(Some(line)) = reader.next_line().await {
-            match line.trim() {
-                l if l.contains("Create a new project?") => {
-                    stdin.write_all(b"y\n").await?;
-                }
-                l if l.contains("Enter project name") => {
-                    stdin.write_all(format!("{}\n", id).as_bytes()).await?;
-                }
-                l if l.contains("Use default configuration?") => {
-                    stdin.write_all(b"y\n").await?;
-                }
-                _ => continue,
-            }
+        // Add RPC URL if provided
+        if let Some(url) = rpc_url {
+            cmd.arg("--rpc-url").arg(url);
         }
 
-        drop(stdin);
-
-        let status = child.wait().await?;
+        let status = cmd.status().await?;
 
         if !status.success() {
             return Err(EnvioError::ProcessFailed(
@@ -167,7 +157,10 @@ mod tests {
         let manager = EnvioManager::new(temp_dir.path().to_path_buf());
 
         // Test project initialization
-        let mut project = manager.init_project("test_project").await.unwrap();
+        let mut project = manager
+            .init_project("test_project", "test_abi", "test_name", "test_chain", None)
+            .await
+            .unwrap();
         assert!(project.dir.exists());
 
         // Test codegen
