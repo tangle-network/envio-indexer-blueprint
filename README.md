@@ -1,6 +1,6 @@
 # <h1 align="center"> Envio Hyperindexer Blueprint 🌐 </h1>
 
-**A Envio Hyperindexer-as-a-Service Blueprint for Tangle**
+**An Envio Hyperindexer-as-a-Service Blueprint for Tangle**
 
 ## 📚 Overview
 
