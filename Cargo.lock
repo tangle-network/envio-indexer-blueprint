@@ -1822,7 +1822,7 @@ checksum = "4f8754ff7a709cf0643f82093fff582192a36afe3b075cde8e752ad9e39d35ed"
 dependencies = [
  "cargo_metadata",
  "fs2",
- "gadget-blueprint-proc-macro-core",
+ "gadget-blueprint-proc-macro-core 0.1.5",
  "rustdoc-types",
  "serde",
  "serde_json",
@@ -4316,11 +4316,11 @@ dependencies = [
 
 [[package]]
 name = "gadget-blueprint-proc-macro"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9279fa5ac3579da5e1c5467c395aae4c910cc63a702fcae097d529687398a4b7"
+checksum = "6f6acfb3136e908bfa36a0e68d5556298aec5dd743a4fd6f2190fccf7125c5dd"
 dependencies = [
- "gadget-blueprint-proc-macro-core",
+ "gadget-blueprint-proc-macro-core 0.2.0",
  "indexmap 2.6.0",
  "itertools 0.13.0",
  "proc-macro2",
@@ -4341,10 +4341,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "gadget-context-derive"
+name = "gadget-blueprint-proc-macro-core"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2f15fa82798ae66fec9bea17791a5f37f200ed9803158b08180fd6ba85737c1"
+checksum = "926d5a5d8c7706be67b50fee8e57d9e9a9c8e4b5430e6ed464c9943128b006bc"
+dependencies = [
+ "cid",
+ "ethereum-types",
+ "serde",
+]
+
+[[package]]
+name = "gadget-blueprint-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c70fbc91721439daf6b33678e83ebed8b2f48fe73a4ab20a050f91040de7764"
+dependencies = [
+ "paste",
+ "serde",
+ "tangle-subxt",
+]
+
+[[package]]
+name = "gadget-context-derive"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b6e98505606a2a344f1e655f8b50eb973cc7247ab34f3af4e0ffbb9be71b8a1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4376,11 +4398,12 @@ dependencies = [
 
 [[package]]
 name = "gadget-sdk"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "155e6e50f8d4651766c2d597132b421cc19f23fddcde752f8014363b98140de0"
+checksum = "fef5d29bf3f6e5b6b43cdfd78946dcd2471b57ac298afcbceb74dde5b71de67d"
 dependencies = [
  "alloy-contract",
+ "alloy-json-abi 0.7.7",
  "alloy-network",
  "alloy-primitives 0.7.7",
  "alloy-provider",
@@ -4401,6 +4424,7 @@ dependencies = [
  "bincode2",
  "bollard",
  "clap 4.5.20",
+ "color-eyre",
  "dashmap 6.1.0",
  "ed25519-zebra 4.0.3",
  "eigensdk",
@@ -4408,7 +4432,8 @@ dependencies = [
  "failure",
  "futures",
  "gadget-blueprint-proc-macro",
- "gadget-blueprint-proc-macro-core",
+ "gadget-blueprint-proc-macro-core 0.2.0",
+ "gadget-blueprint-serde",
  "gadget-context-derive",
  "gadget-io",
  "getrandom",
