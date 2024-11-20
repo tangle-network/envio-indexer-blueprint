@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: rust-validation-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-10-13
+          components: rustfmt
+
+      - name: Check Formatting
+        run: cargo fmt -- --check
+
+  lint:
+    timeout-minutes: 120
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Verify Forge installation
+        run: forge --version
+
+      - name: Install Solidity Dependencies
+        run: forge soldeer update -d
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-10-13
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+
+      - name: Forge build
+        run: forge update && forge build
+
+      - uses: taiki-e/github-actions/free-device-space@main
+
+      - name: Run Clippy
+        run: cargo clippy --tests --examples -- -D warnings
+
+  test:
+    timeout-minutes: 90
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Verify Forge installation
+        run: forge --version
+
+      - name: Install Solidity Dependencies
+        run: forge soldeer update -d
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2024-10-13
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Forge build
+        run: forge update && forge build
+
+      - uses: taiki-e/github-actions/free-device-space@main
+
+      - name: tests
+        run: cargo nextest run

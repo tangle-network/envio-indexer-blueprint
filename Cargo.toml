@@ -1,0 +1,61 @@
+[package]
+name = "envio-hyperindex-blueprint"
+version = "0.1.0"
+edition = "2021"
+description = "A Tangle Blueprint for running envio indexers"
+authors = ["Drew Stone <drewstone329@gmail.com>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://tangle.tools"
+repository = "https://github.com/tangle-network/envio-hyperindex-blueprint"
+readme = "README.md"
+categories = ["cryptography", "cryptography::cryptocurrencies"]
+keywords = ["tangle", "blueprint", "avs"]
+rust-version = "1.81"
+
+[dependencies]
+tracing = "0.1"
+async-trait = "0.1"
+color-eyre = "0.6"
+structopt = "0.3.26"
+tokio = { version = "^1", default-features = false, features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["parking_lot", "env-filter"] }
+serde_json = "1.0.133"
+serde = "1.0.215"
+lazy_static = "1.5.0"
+alloy-json-abi = "0.8.12"
+alloy-sol-types = "0.8.12"
+alloy-primitives = "0.8.12"
+tempfile = "3.14.0"
+uuid = "1.11.0"
+thiserror = "2.0.3"
+
+[dependencies.gadget-sdk]
+version = "0.4.0"
+default-features = false
+features = ["getrandom"]
+
+[build-dependencies]
+blueprint-metadata = "0.1.6"
+
+[features]
+default = ["std"]
+std = ["gadget-sdk/std"]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "envio-hyperindex-blueprint"
+path = "src/main.rs"
+
+[package.metadata.blueprint]
+manager = { Evm = "HelloBlueprint" }
+
+[[package.metadata.gadget.Native.sources]]
+owner = "tangle-network"
+repo = "envio-hyperindex-blueprint"
+tag = "0.1.0"
+binaries = [
+    { arch = "Amd64", os = "Linux", name = "amd64-linux-envio-hyperindex-blueprint-gadget" },
+    { arch = "Arm64", os = "Linux", name = "arm64-linux-envio-hyperindex-blueprint-gadget" },
+]
