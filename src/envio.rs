@@ -10,8 +10,10 @@ pub enum EnvioError {
     ProcessOutput(String),
     #[error("Process failed: {0}")]
     ProcessFailed(String),
-    #[error("Invalid project state: {0}")]
+    #[error("Invalid state: {0}")]
     InvalidState(String),
+    #[error("Docker error: {0}")]
+    DockerError(String),
 }
 
 impl From<EnvioError> for String {
@@ -158,7 +160,7 @@ mod tests {
 
         // Test project initialization
         let mut project = manager
-            .init_project("test_project", "test_abi", "test_name", "test_chain", None)
+            .init_project("test_project", "test_abi", "test_name", "ethereum", None)
             .await
             .unwrap();
         assert!(project.dir.exists());
