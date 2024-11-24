@@ -1,23 +1,24 @@
-pub mod envio;
+pub mod envio_utils;
 pub mod jobs;
 pub mod kubernetes;
 pub mod network;
 pub mod service_context;
+pub mod test_utils;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use envio::EnvioManager;
+    use envio_utils::{project::EnvioManager, ContractConfig, ContractSource, IndexerConfig};
     use http::{Request, Response};
 
     use jobs::spawn_indexer_kube;
     use kube::{api::Api, core::ObjectMeta, Client};
     use kubernetes::{
-        envio::{EnvioIndexer, EnvioIndexerConfig, EnvioIndexerSpec},
+        envio::{EnvioIndexer, EnvioIndexerSpec},
         K8sManager,
     };
-    use service_context::{DeploymentMode, IndexerConfig, ServiceContext, SpawnIndexerParams};
+    use service_context::{DeploymentMode, ServiceContext, SpawnIndexerParams};
     use std::sync::Arc;
     use std::{collections::HashMap, path::PathBuf};
     use tokio::sync::RwLock;
@@ -43,6 +44,28 @@ mod tests {
         (context, handle)
     }
 
+    fn create_test_config() -> IndexerConfig {
+        let deployment = envio_utils::config::ContractDeployment::new(
+            "ethereum".to_string(),
+            "0x123".to_string(),
+            "http://localhost:8545".to_string(),
+            None,
+            None,
+        );
+
+        IndexerConfig {
+            name: "test-indexer".to_string(),
+            contracts: vec![ContractConfig::new(
+                "TestContract".to_string(),
+                ContractSource::Abi {
+                    abi: Some(r#"{"test": "abi"}"#.to_string()),
+                    url: None,
+                },
+                vec![deployment],
+            )],
+        }
+    }
+
     #[tokio::test]
     async fn test_spawn_indexer_kube_mock() {
         let (context, mut handle) = setup_mock_context().await;
@@ -51,12 +74,7 @@ mod tests {
         let response_indexer = EnvioIndexer {
             metadata: ObjectMeta::default(),
             spec: EnvioIndexerSpec {
-                config: EnvioIndexerConfig {
-                    name: "test-indexer".to_string(),
-                    abi: "{}".to_string(),
-                    blockchain: "ethereum".to_string(),
-                    rpc_url: Some("http://localhost:8545".to_string()),
-                },
+                config: create_test_config(),
             },
             status: None,
         };
@@ -79,12 +97,7 @@ mod tests {
 
         // Test the actual function
         let params = SpawnIndexerParams {
-            config: IndexerConfig {
-                name: "test-indexer".to_string(),
-                abi: r#"{"test": "abi"}"#.to_string(),
-            },
-            blockchain: "ethereum".to_string(),
-            rpc_url: Some("http://localhost:8545".to_string()),
+            config: create_test_config(),
         };
 
         let params_bytes = serde_json::to_vec(&params).unwrap();
@@ -106,14 +119,8 @@ mod tests {
             deployment_mode: DeploymentMode::Kubernetes,
             k8s_manager: Some(K8sManager::new(client, "test-namespace".to_string())),
         };
-
         let params = SpawnIndexerParams {
-            config: IndexerConfig {
-                name: "test-indexer".to_string(),
-                abi: r#"{"test": "abi"}"#.to_string(),
-            },
-            blockchain: "ethereum".to_string(),
-            rpc_url: Some("http://localhost:8545".to_string()),
+            config: create_test_config(),
         };
 
         let params_bytes = serde_json::to_vec(&params).unwrap();

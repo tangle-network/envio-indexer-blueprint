@@ -1,4 +1,4 @@
-use envio::{EnvioManager, EnvioProject};
+use envio_utils::{EnvioManager, EnvioProject};
 use gadget_sdk::config::StdGadgetConfiguration;
 use schemars::JsonSchema;
 use std::collections::HashMap;
@@ -7,35 +7,15 @@ use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::RwLock;
 
-use crate::{envio, kubernetes::K8sManager};
+use crate::{
+    envio_utils::{self, IndexerConfig},
+    kubernetes::K8sManager,
+};
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexerConfig {
-    pub name: String,
-    pub abi: String,
-}
-
-impl IndexerConfig {
-    pub fn validate(&self) -> Result<(), String> {
-        if self.name.is_empty() {
-            return Err("Indexer name cannot be empty".to_string());
-        }
-        if self.abi.is_empty() {
-            return Err("Contract ABI cannot be empty".to_string());
-        }
-        // Validate ABI is valid JSON
-        serde_json::from_str::<serde_json::Value>(&self.abi)
-            .map_err(|e| format!("Invalid ABI JSON: {}", e))?;
-        Ok(())
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SpawnIndexerParams {
     pub config: IndexerConfig,
-    pub blockchain: String,
-    pub rpc_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,36 +69,26 @@ impl ServiceContext {
         }
     }
 
-    fn generate_indexer_id(&self, config: &IndexerConfig) -> String {
+    fn generate_indexer_id(&self, name: &str) -> String {
         let id = uuid::Uuid::new_v4();
-        let name = config.name.to_lowercase().replace([' ', '-'], "_");
+        let name = name.to_lowercase().replace([' ', '-'], "_");
         format!("indexer_{}_{}", name, id)
     }
 
-    pub async fn spawn_indexer(
-        &self,
-        config: IndexerConfig,
-        blockchain: String,
-        rpc_url: Option<String>,
-    ) -> Result<SpawnIndexerResult, String> {
-        let id = self.generate_indexer_id(&config);
+    pub async fn spawn_indexer(&self, config: IndexerConfig) -> Result<SpawnIndexerResult, String> {
+        let id = self.generate_indexer_id(&config.name);
         let mut indexers = self.indexers.write().await;
 
         if indexers.contains_key(&id) {
             return Err(format!("Indexer with id {} already exists", id));
         }
 
-        // Initialize envio project
+        // Initialize envio project with all contracts
         let project = self
             .envio_manager
-            .init_project(
-                &id,
-                &config.abi,
-                &config.name,
-                &blockchain,
-                rpc_url.as_deref(),
-            )
-            .await?;
+            .init_project(&id, config.contracts.as_ref())
+            .await
+            .map_err(|e| e.to_string())?;
 
         // Create indexer process entry
         let process = IndexerProcess {
