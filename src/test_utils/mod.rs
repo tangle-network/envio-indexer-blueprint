@@ -175,7 +175,7 @@ pub fn create_test_contract(name: &str, network_id: &str) -> ContractConfig {
         },
         vec![create_deployment(
             network_id,
-            Some("0x123".to_string()),
+            Some("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".to_string()),
             None,
             None,
             None,
@@ -191,9 +191,9 @@ pub fn create_test_explorer_contract(name: &str, network_id: &str) -> ContractCo
         },
         vec![create_deployment(
             network_id,
-            Some("0x456".to_string()),
+            Some("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string()),
             None,
-            Some("0x789".to_string()),
+            Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".to_string()),
             None,
         )],
     )

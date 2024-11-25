@@ -86,14 +86,14 @@ impl ServiceContext {
         // Initialize envio project with all contracts
         let project = self
             .envio_manager
-            .init_project(&id, config.contracts.as_ref())
+            .init_project(&id, config.clone().contracts)
             .await
             .map_err(|e| e.to_string())?;
 
         // Create indexer process entry
         let process = IndexerProcess {
             id: id.clone(),
-            config,
+            config: config.clone(),
             output_dir: project.dir,
             process: None,
             status: IndexerStatus::Configured,

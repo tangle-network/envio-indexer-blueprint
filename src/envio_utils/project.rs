@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use enigo::{Direction, Enigo, Key, Keyboard};
+
 use envio::{
     clap_definitions::{InitArgs, ProjectPaths},
     config_parsing::{
@@ -18,10 +19,10 @@ use envio::{
         InitConfig,
     },
 };
-use expectrl::{spawn, Regex, Session, WaitStatus};
+use expectrl::{check, spawn, Regex, Session, WaitStatus};
 use fake::faker::address::en;
 use std::{
-    io::{BufRead, Read},
+    io::{BufRead, Read, Write},
     path::PathBuf,
     time::Duration,
 };
@@ -51,6 +52,8 @@ pub enum EnvioError {
     EnigoError(#[from] enigo::InputError),
     #[error("Join error: {0}")]
     JoinError(#[from] tokio::task::JoinError),
+    #[error("Expect error: {0}")]
+    ExpectError(#[from] expectrl::Error),
 }
 
 impl From<EnvioError> for String {
@@ -128,7 +131,7 @@ impl EnvioManager {
     pub async fn init_project(
         &self,
         id: &str,
-        contracts: &[ContractConfig],
+        contracts: Vec<ContractConfig>,
     ) -> Result<EnvioProject, EnvioError> {
         let project_dir = self.base_dir.join(id);
         std::fs::create_dir_all(&project_dir)?;
@@ -139,124 +142,50 @@ impl EnvioManager {
             ));
         }
 
-        let first_contract = contracts.first().ok_or_else(|| {
-            EnvioError::InvalidState("No contracts provided for initialization".into())
-        })?;
-
-        let first_deployment = first_contract
-            .deployments
-            .first()
-            .ok_or_else(|| EnvioError::InvalidState("First contract has no deployments".into()))?;
-
         // Get ABIs and set up directory
         let abis_dir = project_dir.join("abis");
         std::fs::create_dir_all(&abis_dir)?;
 
         // Get ABI for each contract and write to file
-        for contract in contracts {
-            let abi = self.get_abi(contract).await?;
+        for contract in contracts.iter() {
+            let abi = self.get_abi(&contract).await?;
             let abi_path = abis_dir.join(format!("{}_abi.json", contract.name));
             std::fs::write(&abi_path, abi)?;
         }
 
-        // Get path for first contract's ABI to use in envio init
-        let abi_path = abis_dir.join(format!("{}_abi.json", first_contract.name));
-
         // Clone the values needed for the blocking task
         let project_dir_clone = project_dir.clone();
-        let contracts = contracts.to_vec();
-        let abi_path = abi_path.clone();
-        let first_deployment = first_deployment.clone();
-        let first_contract = first_contract.clone();
+        let contracts_clone = contracts.to_vec();
         let id_clone = id.to_string();
 
-        // Run the UI automation in a blocking task
         tokio::task::spawn_blocking(move || {
-            let mut child = std::process::Command::new("envio")
-                .arg("init")
-                .arg("contract-import")
-                .arg("local")
-                .arg("-a")
-                .arg(&abi_path)
-                .arg("-b")
-                .arg(&first_deployment.network_id)
-                .arg("--contract-name")
-                .arg(&first_contract.name)
-                .arg("--rpc-url")
-                .arg(&first_deployment.rpc_url)
-                .arg("--name")
-                .arg(&id_clone)
-                .current_dir(&project_dir_clone)
-                .stdin(std::process::Stdio::inherit()) // Changed this line
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?;
+            std::env::set_current_dir(&project_dir_clone).map_err(|e| {
+                EnvioError::ProcessFailed(format!("Failed to set directory: {}", e))
+            })?;
 
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| EnvioError::ProcessFailed("Failed to capture stdout".into()))?;
-            let stderr = child
-                .stderr
-                .take()
-                .ok_or_else(|| EnvioError::ProcessFailed("Failed to capture stderr".into()))?;
-
-            let settings: enigo::Settings = Default::default();
-            let mut enigo = Enigo::new(&settings)
-                .map_err(|e| EnvioError::ProcessFailed(format!("Failed to create Enigo: {}", e)))?;
-
-            let stdout_reader = std::io::BufReader::new(stdout);
-            let stderr_reader = std::io::BufReader::new(stderr);
+            let mut session = spawn("envio init contract-import local")
+                .map_err(|e| EnvioError::ProcessFailed(format!("Failed to spawn envio: {}", e)))?;
 
             let mut current_contract_idx = 0;
             let mut current_deployment_idx = 0;
 
-            // Add safety counters
-            // Add safety counters
-            let mut prompt_count = 0;
-            const MAX_PROMPTS: usize = 50; // Maximum number of prompts we'll handle
-            const PROMPT_DELAY: Duration = Duration::from_millis(500);
-
-            // Read lines synchronously
-            for line in stderr_reader.lines() {
-                let line = line?;
-                println!("stderr: {}", line);
-
-                // Safety check for maximum prompts
-                prompt_count += 1;
-                if prompt_count > MAX_PROMPTS {
-                    child.kill()?;
-                    return Err(EnvioError::ProcessFailed(
-                        "Exceeded maximum number of prompts, possible infinite loop".into(),
-                    ));
-                }
-
-                // Add delay between interactions
-                std::thread::sleep(PROMPT_DELAY);
-
-                Self::handle_envio_prompts(
-                    &line,
-                    &mut enigo,
+            loop {
+                Self::handle_envio_prompt(
+                    &mut session,
                     &contracts,
                     &mut current_contract_idx,
                     &mut current_deployment_idx,
                 )?;
             }
 
-            // Check the process status with timeout
-            match child.wait() {
-                Ok(status) => {
-                    if !status.success() {
-                        return Err(EnvioError::ProcessFailed("envio init failed".into()));
-                    }
-                }
-                Err(e) => {
-                    child.kill()?;
-                    return Err(EnvioError::ProcessFailed(format!("Process error: {}", e)));
-                }
-            }
+            let status = session.get_process().wait().map_err(|e| {
+                EnvioError::ProcessFailed(format!("Failed to wait for process: {}", e))
+            })?;
 
-            Ok(())
+            match status {
+                WaitStatus::Exited(_, code) if code == 0 => Ok(()),
+                _ => Err(EnvioError::ProcessFailed("Init process failed".into())),
+            }
         })
         .await??;
 
@@ -267,33 +196,34 @@ impl EnvioManager {
         })
     }
 
-    fn handle_envio_prompts(
-        line: &str,
-        enigo: &mut Enigo,
+    fn handle_envio_prompt(
+        session: &mut Session,
         contracts: &[ContractConfig],
         current_contract_idx: &mut usize,
         current_deployment_idx: &mut usize,
     ) -> Result<(), EnvioError> {
-        println!("Processing line: {}", line);
-        std::thread::sleep(Duration::from_millis(100));
+        // session.set_expect_lazy(true);
+        let captures = session.expect(Regex(r"\?.*"))?;
+        let prompt = String::from_utf8_lossy(&captures.as_bytes()).to_string();
+        println!("Processing prompt: {}", prompt);
 
-        match line.trim() {
+        match prompt.trim() {
             s if s.contains("Specify a folder name") => {
                 println!("Handling folder name prompt");
-                enigo.key(Key::Return, Direction::Click)?;
+                session.send_line("\n")?;
+                session.expect(Regex(r".*\n"))?;
+                session.flush()?;
+                std::thread::sleep(std::time::Duration::from_millis(500));
             }
             s if s.contains("Which language would you like to use?") => {
-                println!("Handling language prompt");
-                enigo.key(Key::DownArrow, Direction::Click)?;
-                std::thread::sleep(Duration::from_millis(100));
-                enigo.key(Key::Return, Direction::Click)?;
+                session.send_line("TypeScript\n")?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Which events would you like to index?") => {
-                println!("Handling events prompt");
-                enigo.key(Key::Return, Direction::Click)?;
+                session.send_line("\n")?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("What is the address of the contract?") => {
-                println!("Handling contract address prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
 
@@ -303,97 +233,84 @@ impl EnvioManager {
                     deployment.address.clone()
                 };
 
-                enigo.text(&address)?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("{}\n", address);
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Would you like to add another contract?") => {
-                println!("Handling add contract prompt");
                 let contract = &contracts[*current_contract_idx];
-                if *current_deployment_idx + 1 < contract.deployments.len() {
-                    println!("Adding another deployment for current contract");
+                let response = if *current_deployment_idx + 1 < contract.deployments.len() {
                     *current_deployment_idx += 1;
-                    enigo.key(Key::DownArrow, Direction::Click)?;
-                    enigo.key(Key::Return, Direction::Click)?;
+                    String::from("y\n")
                 } else if *current_contract_idx + 1 < contracts.len() {
-                    println!("Adding another contract");
                     *current_contract_idx += 1;
                     *current_deployment_idx = 0;
-                    enigo.key(Key::DownArrow, Direction::Click)?;
-                    enigo.key(Key::DownArrow, Direction::Click)?;
-                    enigo.key(Key::Return, Direction::Click)?;
+                    String::from("y\n")
                 } else {
-                    println!("No more contracts to add");
-                    enigo.key(Key::DownArrow, Direction::Click)?;
-                    enigo.key(Key::DownArrow, Direction::Click)?;
-                    enigo.key(Key::DownArrow, Direction::Click)?;
-                    enigo.key(Key::Return, Direction::Click)?;
-                }
+                    String::from("n\n")
+                };
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Choose network:") => {
-                println!("Handling network choice prompt");
-                enigo.key(Key::Return, Direction::Click)?;
+                session.send_line("\n")?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Enter the network id:") => {
-                println!("Handling network ID prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
                 let network_id = deployment.resolve_network_to_number();
-                enigo.text(&network_id.to_string())?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("{}\n", network_id);
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Please provide an rpc url") => {
-                println!("Handling RPC URL prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
-                enigo.text(&deployment.rpc_url)?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("{}\n", deployment.rpc_url);
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Please provide a start block") => {
-                println!("Handling start block prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
                 let start_block = deployment.start_block.unwrap_or(0);
-                enigo.text(&start_block.to_string())?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("{}\n", start_block);
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Would you like to import from a block explorer or a local abi?") => {
-                println!("Handling import source prompt");
-                let contract = &contracts[*current_contract_idx];
-                match &contract.source {
-                    ContractSource::Explorer { .. } => {
-                        enigo.key(Key::Return, Direction::Click)?;
-                    }
-                    ContractSource::Abi { .. } => {
-                        enigo.key(Key::DownArrow, Direction::Click)?;
-                        enigo.key(Key::Return, Direction::Click)?;
-                    }
-                }
+                let response = match &contracts[*current_contract_idx].source {
+                    ContractSource::Explorer { .. } => String::from("1\n"),
+                    ContractSource::Abi { .. } => String::from("2\n"),
+                };
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("Which blockchain would you like to import a contract from?") => {
-                println!("Handling blockchain selection prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
-                let network = deployment.resolve_network_to_string();
-                enigo.text(&network)?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("{}\n", deployment.resolve_network_to_string());
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("What is the path to your json abi file?") => {
-                println!("Handling ABI path prompt");
                 let contract = &contracts[*current_contract_idx];
-                let abi_path = format!("./abis/{}_abi.json", contract.name);
-                enigo.text(&abi_path)?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("./abis/{}_abi.json\n", contract.name);
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             s if s.contains("What is the name of this contract?") => {
-                println!("Handling contract name prompt");
                 let contract = &contracts[*current_contract_idx];
-                enigo.text(&contract.name)?;
-                enigo.key(Key::Return, Direction::Click)?;
+                let response = format!("{}\n", contract.name);
+                session.send_line(&response)?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             _ => {
-                println!("Unhandled prompt: {}", line);
+                session.send_line("\n")?;
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
-        }
+        };
 
         Ok(())
     }
@@ -591,7 +508,7 @@ mod tests {
 
         // Test project initialization
         let mut project = manager
-            .init_project("test_project", vec![contract].as_ref())
+            .init_project("test_project", vec![contract])
             .await
             .unwrap();
         assert!(project.dir.exists());

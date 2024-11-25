@@ -11,7 +11,6 @@ mod tests {
 
     use envio_utils::{project::EnvioManager, ContractConfig, ContractSource, IndexerConfig};
     use http::{Request, Response};
-
     use jobs::spawn_indexer_kube;
     use kube::{api::Api, core::ObjectMeta, Client};
     use kubernetes::{
@@ -21,6 +20,7 @@ mod tests {
     use service_context::{DeploymentMode, ServiceContext, SpawnIndexerParams};
     use std::sync::Arc;
     use std::{collections::HashMap, path::PathBuf};
+    use test_utils::create_test_contract;
     use tokio::sync::RwLock;
     use tower_test::mock;
 
@@ -45,24 +45,9 @@ mod tests {
     }
 
     fn create_test_config() -> IndexerConfig {
-        let deployment = envio_utils::config::ContractDeployment::new(
-            "ethereum".to_string(),
-            "0x123".to_string(),
-            "http://localhost:8545".to_string(),
-            None,
-            None,
-        );
-
         IndexerConfig {
             name: "test-indexer".to_string(),
-            contracts: vec![ContractConfig::new(
-                "TestContract".to_string(),
-                ContractSource::Abi {
-                    abi: Some(r#"{"test": "abi"}"#.to_string()),
-                    url: None,
-                },
-                vec![deployment],
-            )],
+            contracts: vec![create_test_contract("TestContract", "1")],
         }
     }
 

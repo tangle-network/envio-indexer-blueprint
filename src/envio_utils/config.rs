@@ -137,26 +137,14 @@ impl IndexerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{
+        create_test_contract, create_test_explorer_contract, generate_multi_address_contract,
+        generate_multi_chain_contract, generate_random_contract_config,
+    };
 
     #[test]
     fn test_single_contract_single_chain() {
-        let deployment = ContractDeployment::new(
-            "Ethereum Mainnet".to_string(),
-            "0x123".to_string(),
-            "http://eth.local".to_string(),
-            None,
-            None,
-        );
-
-        let contract = ContractConfig::new(
-            "SimpleContract".to_string(),
-            ContractSource::Abi {
-                abi: Some("{}".to_string()),
-                url: None,
-            },
-            vec![deployment],
-        );
-
+        let contract = create_test_contract("SimpleContract", "1");
         let config = IndexerConfig::new("single_test".to_string(), vec![contract]);
         assert!(config.validate().is_ok());
         assert_eq!(
@@ -167,44 +155,11 @@ mod tests {
 
     #[test]
     fn test_single_contract_multiple_chains() {
-        let deployments = vec![
-            ContractDeployment::new(
-                "Ethereum Mainnet".to_string(),
-                "0x123".to_string(),
-                "http://eth.local".to_string(),
-                None,
-                None,
-            ),
-            ContractDeployment::new(
-                "Optimism".to_string(),
-                "0x456".to_string(),
-                "http://op.local".to_string(),
-                None,
-                None,
-            ),
-            ContractDeployment::new(
-                "Arbitrum".to_string(),
-                "0x789".to_string(),
-                "http://arb.local".to_string(),
-                None,
-                None,
-            ),
-        ];
-
-        let contract = ContractConfig::new(
-            "MultiChainContract".to_string(),
-            ContractSource::Abi {
-                abi: None,
-                url: Some(
-                    "https://api.etherscan.io/api?module=contract&action=getabi&address=0x123"
-                        .to_string(),
-                ),
-            },
-            deployments,
-        );
-
+        let contract = generate_multi_chain_contract();
         let config = IndexerConfig::new("multi_chain_test".to_string(), vec![contract]);
         assert!(config.validate().is_ok());
+
+        // Verify first few networks resolve correctly
         assert_eq!(
             config.contracts[0].deployments[0].resolve_network_to_number(),
             "1"
@@ -215,180 +170,58 @@ mod tests {
         );
         assert_eq!(
             config.contracts[0].deployments[2].resolve_network_to_number(),
-            "42161"
+            "137"
         );
     }
 
     #[test]
     fn test_multiple_contracts_same_chain() {
-        let deployment1 = ContractDeployment::new(
-            "Ethereum Mainnet".to_string(),
-            "0x123".to_string(),
-            "http://eth.local".to_string(),
-            None,
-            None,
+        let contract1 = create_test_contract("Contract1", "1");
+        let contract2 = create_test_explorer_contract("Contract2", "1");
+
+        let config = IndexerConfig::new(
+            "multi_contract_test".to_string(),
+            vec![contract1, contract2],
         );
-
-        let deployment2 = ContractDeployment::new(
-            "Ethereum Mainnet".to_string(),
-            "0x456".to_string(),
-            "http://eth.local".to_string(),
-            None,
-            None,
-        );
-
-        let contracts = vec![
-            ContractConfig::new(
-                "Contract1".to_string(),
-                ContractSource::Abi {
-                    abi: Some("{}".to_string()),
-                    url: None,
-                },
-                vec![deployment1],
-            ),
-            ContractConfig::new(
-                "Contract2".to_string(),
-                ContractSource::Explorer {
-                    api_url: "key123".to_string(),
-                },
-                vec![deployment2],
-            ),
-        ];
-
-        let config = IndexerConfig::new("multi_contract_test".to_string(), contracts);
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_same_contract_multiple_addresses() {
-        let deployments = vec![
-            ContractDeployment::new(
-                "Ethereum Mainnet".to_string(),
-                "0x123".to_string(),
-                "http://eth.local".to_string(),
-                None,
-                None,
-            ),
-            ContractDeployment::new(
-                "Ethereum Mainnet".to_string(),
-                "0x456".to_string(),
-                "http://eth.local".to_string(),
-                None,
-                None,
-            ),
-            ContractDeployment::new(
-                "Ethereum Mainnet".to_string(),
-                "0x789".to_string(),
-                "http://eth.local".to_string(),
-                None,
-                None,
-            ),
-        ];
-
-        let contract = ContractConfig::new(
-            "MultiAddressContract".to_string(),
-            ContractSource::Abi {
-                abi: Some("{}".to_string()),
-                url: None,
-            },
-            deployments,
-        );
-
+        let contract = generate_multi_address_contract("1", 3);
         let config = IndexerConfig::new("multi_address_test".to_string(), vec![contract]);
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_multiple_contracts_different_chains() {
-        let contracts = vec![
-            ContractConfig::new(
-                "EthContract".to_string(),
-                ContractSource::Abi {
-                    abi: Some("{}".to_string()),
-                    url: None,
-                },
-                vec![ContractDeployment::new(
-                    "Ethereum Mainnet".to_string(),
-                    "0x123".to_string(),
-                    "http://eth.local".to_string(),
-                    None,
-                    None,
-                )],
-            ),
-            ContractConfig::new(
-                "OptContract".to_string(),
-                ContractSource::Explorer {
-                    api_url: "key123".to_string(),
-                },
-                vec![ContractDeployment::new(
-                    "Optimism".to_string(),
-                    "0x456".to_string(),
-                    "http://op.local".to_string(),
-                    Some("0x789".to_string()),
-                    None,
-                )],
-            ),
-        ];
+        let contract1 = create_test_contract("EthContract", "1");
+        let contract2 = create_test_explorer_contract("OptContract", "10");
 
-        let config = IndexerConfig::new("multi_chain_contract_test".to_string(), contracts);
+        let config = IndexerConfig::new(
+            "multi_chain_contract_test".to_string(),
+            vec![contract1, contract2],
+        );
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_contract_source_validation() {
-        // Test ABI source with string
-        let abi_string = ContractConfig::new(
-            "AbiString".to_string(),
-            ContractSource::Abi {
-                abi: Some("{}".to_string()),
-                url: None,
-            },
-            vec![ContractDeployment::new(
-                "1".to_string(),
-                "0x123".to_string(),
-                "http://local".to_string(),
-                None,
-                None,
-            )],
-        );
-        assert!(IndexerConfig::new("test".to_string(), vec![abi_string])
+        // Test random contract configs with different source types
+        let contract = generate_random_contract_config();
+        assert!(IndexerConfig::new("test".to_string(), vec![contract])
             .validate()
             .is_ok());
 
-        // Test ABI source with URL
-        let abi_url = ContractConfig::new(
-            "AbiUrl".to_string(),
-            ContractSource::Abi {
-                abi: None,
-                url: Some("https://api.example.com/abi".to_string()),
-            },
-            vec![ContractDeployment::new(
-                "1".to_string(),
-                "0x123".to_string(),
-                "http://local".to_string(),
-                None,
-                None,
-            )],
-        );
-        assert!(IndexerConfig::new("test".to_string(), vec![abi_url])
+        // Test specific contract with ABI source
+        let contract = create_test_contract("AbiTest", "1");
+        assert!(IndexerConfig::new("test".to_string(), vec![contract])
             .validate()
             .is_ok());
 
-        // Test Explorer source
-        let explorer = ContractConfig::new(
-            "Explorer".to_string(),
-            ContractSource::Explorer {
-                api_url: "key123".to_string(),
-            },
-            vec![ContractDeployment::new(
-                "1".to_string(),
-                "0x123".to_string(),
-                "http://local".to_string(),
-                None,
-                None,
-            )],
-        );
-        assert!(IndexerConfig::new("test".to_string(), vec![explorer])
+        // Test specific contract with Explorer source
+        let contract = create_test_explorer_contract("ExplorerTest", "1");
+        assert!(IndexerConfig::new("test".to_string(), vec![contract])
             .validate()
             .is_ok());
     }
