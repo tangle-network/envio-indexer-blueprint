@@ -61,10 +61,85 @@ Or, if you prefer to install the CLI from crates.io:
 cargo install cargo-tangle --force # to get the latest version.
 ```
 
+## 🧪 Testing
+
+### Prerequisites
+
+Before running tests, ensure you have the following installed:
+
+- [Docker](https://docs.docker.com/get-docker/)
+- [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+
+### Setting up the Test Environment
+
+1. Create a local Kubernetes cluster using Kind:
+
+```bash
+kind create cluster --name test-cluster
+```
+
+2. Create the test namespace:
+
+```bash
+kubectl create namespace test-namespaces
+```
+
+3. Set up a local Docker registry:
+
+```bash
+docker run -d -p 5000:5000 --name registry registry:2
+```
+
+4. Connect the registry to Kind network
+
+```bash
+docker network connect kind registry
+```
+
+### Running Tests
+
+The test suite includes both unit tests and integration tests that interact with the local Kubernetes cluster. Run them with:
+
+```bash
+cargo test
+```
+
+Key test files:
+
+- `src/kubernetes/deployment.rs`: Tests for Kubernetes deployment management
+- `src/lib.rs`: Integration tests for indexer spawning
+- `src/envio.rs`: Tests for Envio project lifecycle
+
+The tests verify:
+
+- Deployment configuration building
+- Service configuration building
+- Local indexer spawning
+- Kubernetes indexer deployment
+- Envio project lifecycle management
+
+Reference implementation:
+
+- [Kubernetes Deployment Tests](src/kubernetes/deployment.rs)
+
+### Cleanup
+
+1. Delete the Kind cluster
+
+```bash
+kind delete cluster --name test-cluster
+```
+
+2. Remove the local Docker registry
+
+```bash
+docker rm -f registry
+```
+
 ## 📜 License
 
-Licensed under either of
-
+- Licensed under either of
 - Apache License, Version 2.0
   ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
 - MIT license

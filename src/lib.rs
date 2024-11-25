@@ -1,37 +1,122 @@
-use gadget_sdk::event_listener::tangle::jobs::{services_post_processor, services_pre_processor};
-use gadget_sdk::event_listener::tangle::TangleEventListener;
-use gadget_sdk::job;
-use gadget_sdk::tangle_subxt::tangle_testnet_runtime::api::services::events::JobCalled;
-
-pub mod envio;
-pub mod generator;
-pub mod indexer_utils;
+pub mod envio_utils;
+pub mod jobs;
+pub mod kubernetes;
 pub mod network;
 pub mod service_context;
-pub mod types;
+pub mod test_utils;
 
-use service_context::{ServiceContext, SpawnIndexerParams};
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[job(
-  id = 0,
-  params(params),
-  event_listener(
-      listener = TangleEventListener::<ServiceContext, JobCalled>,
-      pre_processor = services_pre_processor,
-      post_processor = services_post_processor,
-  ),
-)]
-pub async fn spawn_indexer(params: Vec<u8>, context: ServiceContext) -> Result<Vec<u8>, String> {
-    let params = serde_json::from_slice::<SpawnIndexerParams>(&params)
-        .map_err(|e| format!("Failed to parse params: {}", e))?;
+    use envio_utils::{project::EnvioManager, IndexerConfig};
+    use http::{Request, Response};
+    use jobs::spawn_indexer_kube;
+    use kube::{api::Api, core::ObjectMeta, Client};
+    use kubernetes::{
+        envio::{EnvioIndexer, EnvioIndexerSpec},
+        K8sManager,
+    };
+    use service_context::{DeploymentMode, ServiceContext, SpawnIndexerParams};
+    use std::sync::Arc;
+    use std::{collections::HashMap, path::PathBuf};
+    use test_utils::create_test_contract;
+    use tokio::sync::RwLock;
+    use tower_test::mock;
 
-    // Validate the configuration
-    params.config.validate()?;
+    // Mock types for unit testing
+    type MockResponseHandle =
+        mock::Handle<Request<kube::client::Body>, Response<kube::client::Body>>;
 
-    // Register and start the indexer
-    let result = context.spawn_indexer(params.config).await?;
-    context.start_indexer(&result.id).await?;
+    /// Helper to create a test context with a mock k8s client
+    async fn setup_mock_context() -> (ServiceContext, MockResponseHandle) {
+        let (mock_service, handle) = mock::pair();
+        let client = Client::new(mock_service, "test-namespace");
 
-    // Serialize the result
-    serde_json::to_vec(&result).map_err(|e| format!("Failed to serialize result: {}", e))
+        let context = ServiceContext {
+            config: gadget_sdk::config::StdGadgetConfiguration::default(),
+            indexers: Arc::new(RwLock::new(HashMap::new())),
+            envio_manager: Arc::new(EnvioManager::new(PathBuf::from("/tmp"))),
+            deployment_mode: DeploymentMode::Kubernetes,
+            k8s_manager: Some(K8sManager::new(client, "test-namespace".to_string())),
+        };
+
+        (context, handle)
+    }
+
+    fn create_test_config() -> IndexerConfig {
+        IndexerConfig {
+            name: "test-indexer".to_string(),
+            contracts: vec![create_test_contract("TestContract", "1")],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_spawn_indexer_kube_mock() {
+        let (context, mut handle) = setup_mock_context().await;
+
+        // Create mock response data
+        let response_indexer = EnvioIndexer {
+            metadata: ObjectMeta::default(),
+            spec: EnvioIndexerSpec {
+                config: create_test_config(),
+            },
+            status: None,
+        };
+
+        // Setup next request/response pair
+        let (request, send) = handle.next_request().await.expect("service not called");
+
+        // Verify request
+        assert_eq!(request.method(), http::Method::POST);
+        assert!(request.uri().path().contains("/envioindexers"));
+
+        // Send response
+        let response_bytes = serde_json::to_vec(&response_indexer).unwrap();
+        send.send_response(
+            Response::builder()
+                .status(201)
+                .body(response_bytes.into())
+                .unwrap(),
+        );
+
+        // Test the actual function
+        let params = SpawnIndexerParams {
+            config: create_test_config(),
+        };
+
+        let params_bytes = serde_json::to_vec(&params).unwrap();
+        let result = spawn_indexer_kube(params_bytes, context).await.unwrap();
+        let result: EnvioIndexer = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(result.spec.config.name, "test-indexer");
+    }
+
+    // Integration test
+    #[tokio::test]
+    #[ignore = "requires kubernetes cluster"]
+    async fn test_spawn_indexer_kube_integration() {
+        let client = Client::try_default().await.unwrap();
+        let context = ServiceContext {
+            config: gadget_sdk::config::StdGadgetConfiguration::default(),
+            indexers: Arc::new(RwLock::new(HashMap::new())),
+            envio_manager: Arc::new(EnvioManager::new(PathBuf::from("/tmp"))),
+            deployment_mode: DeploymentMode::Kubernetes,
+            k8s_manager: Some(K8sManager::new(client, "test-namespace".to_string())),
+        };
+        let params = SpawnIndexerParams {
+            config: create_test_config(),
+        };
+
+        let params_bytes = serde_json::to_vec(&params).unwrap();
+        let result = spawn_indexer_kube(params_bytes, context).await.unwrap();
+        let result: EnvioIndexer = serde_json::from_slice(&result).unwrap();
+
+        // Verify the indexer was created in kubernetes
+        let client = Client::try_default().await.unwrap();
+        let indexers: Api<EnvioIndexer> = Api::namespaced(client, "test-namespace");
+        let created = indexers.get("test-indexer").await.unwrap();
+
+        assert_eq!(created.spec.config.name, "test-indexer");
+    }
 }
