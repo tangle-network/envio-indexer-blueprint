@@ -1,33 +1,8 @@
-use anyhow::{anyhow, Context, Result};
-use enigo::{Direction, Enigo, Key, Keyboard};
-
-use envio::{
-    clap_definitions::{InitArgs, ProjectPaths},
-    config_parsing::{
-        chain_helpers::{HypersyncNetwork, Network},
-        contract_import::converters::{
-            ContractImportNetworkSelection, NetworkKind, SelectedContract,
-        },
-        entity_parsing::Schema,
-        system_config::SystemConfig,
-    },
-    constants::project_paths::{self, DEFAULT_CONFIG_PATH, DEFAULT_GENERATED_PATH},
-    executor::init::run_init_args,
-    init_config::{
-        self,
-        evm::{ContractImportSelection, InitFlow},
-        InitConfig,
-    },
-};
-use expectrl::{check, spawn, Regex, Session, WaitStatus};
-use fake::faker::address::en;
-use std::{
-    io::{BufRead, Read, Write},
-    path::PathBuf,
-    time::Duration,
-};
+use anyhow::Result;
+use rexpect::spawn_bash;
+// use expectrl::{spawn, Regex, Session, WaitStatus};
+use std::{io::Write, path::PathBuf};
 use thiserror::Error;
-use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, Command};
 
 use super::config::{ContractConfig, ContractSource};
@@ -54,6 +29,8 @@ pub enum EnvioError {
     JoinError(#[from] tokio::task::JoinError),
     #[error("Expect error: {0}")]
     ExpectError(#[from] expectrl::Error),
+    #[error("rexpect error: {0}")]
+    RexpectError(#[from] rexpect::error::Error),
 }
 
 impl From<EnvioError> for String {
@@ -148,7 +125,7 @@ impl EnvioManager {
 
         // Get ABI for each contract and write to file
         for contract in contracts.iter() {
-            let abi = self.get_abi(&contract).await?;
+            let abi = self.get_abi(contract).await?;
             let abi_path = abis_dir.join(format!("{}_abi.json", contract.name));
             std::fs::write(&abi_path, abi)?;
         }
@@ -159,33 +136,38 @@ impl EnvioManager {
         let id_clone = id.to_string();
 
         tokio::task::spawn_blocking(move || {
-            std::env::set_current_dir(&project_dir_clone).map_err(|e| {
-                EnvioError::ProcessFailed(format!("Failed to set directory: {}", e))
-            })?;
+            std::env::set_current_dir(&project_dir_clone)?;
 
-            let mut session = spawn("envio init contract-import local")
-                .map_err(|e| EnvioError::ProcessFailed(format!("Failed to spawn envio: {}", e)))?;
+            let mut session = spawn_bash(Some(2000))?;
+            session.send_line("envio init contract-import local")?;
 
             let mut current_contract_idx = 0;
             let mut current_deployment_idx = 0;
 
             loop {
-                Self::handle_envio_prompt(
+                match Self::handle_envio_prompts(
                     &mut session,
                     &contracts,
                     &mut current_contract_idx,
                     &mut current_deployment_idx,
-                )?;
+                ) {
+                    Ok(()) => continue,
+                    Err(EnvioError::RexpectError(rexpect::error::Error::EOF { .. })) => break,
+                    Err(e) => return Err(e),
+                }
             }
 
-            let status = session.get_process().wait().map_err(|e| {
-                EnvioError::ProcessFailed(format!("Failed to wait for process: {}", e))
-            })?;
-
+            let status = session.process.wait()?;
             match status {
-                WaitStatus::Exited(_, code) if code == 0 => Ok(()),
-                _ => Err(EnvioError::ProcessFailed("Init process failed".into())),
+                rexpect::process::wait::WaitStatus::Exited(_, _) => (),
+                _ => {
+                    return Err(EnvioError::ProcessFailed(
+                        "Envio process exited unexpectedly".to_string(),
+                    ))
+                }
             }
+
+            Ok(())
         })
         .await??;
 
@@ -196,270 +178,123 @@ impl EnvioManager {
         })
     }
 
-    fn handle_envio_prompt(
-        session: &mut Session,
+    fn handle_envio_prompts(
+        session: &mut rexpect::session::PtySession,
         contracts: &[ContractConfig],
         current_contract_idx: &mut usize,
         current_deployment_idx: &mut usize,
     ) -> Result<(), EnvioError> {
-        // session.set_expect_lazy(true);
-        let captures = session.expect(Regex(r"\?.*"))?;
-        let prompt = String::from_utf8_lossy(&captures.as_bytes()).to_string();
+        let (_, prompt) = session.exp_regex(r"\?.*")?;
         println!("Processing prompt: {}", prompt);
 
         match prompt.trim() {
             s if s.contains("Specify a folder name") => {
                 println!("Handling folder name prompt");
-                session.send_line("\n")?;
-                session.expect(Regex(r".*\n"))?;
-                session.flush()?;
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                session.send_line("")?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Which language would you like to use?") => {
-                session.send_line("TypeScript\n")?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                println!("Handling language prompt");
+                session.send_line("TypeScript")?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Which events would you like to index?") => {
-                session.send_line("\n")?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                println!("Handling events prompt");
+                session.send_line("")?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("What is the address of the contract?") => {
+                println!("Handling contract address prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
-
                 let address = if !deployment.address.starts_with("0x") {
                     format!("0x{}", deployment.address)
                 } else {
                     deployment.address.clone()
                 };
-
-                let response = format!("{}\n", address);
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&address)?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Would you like to add another contract?") => {
+                println!("Handling add contract prompt");
                 let contract = &contracts[*current_contract_idx];
                 let response = if *current_deployment_idx + 1 < contract.deployments.len() {
                     *current_deployment_idx += 1;
-                    String::from("y\n")
+                    "y"
                 } else if *current_contract_idx + 1 < contracts.len() {
                     *current_contract_idx += 1;
                     *current_deployment_idx = 0;
-                    String::from("y\n")
+                    "y"
                 } else {
-                    String::from("n\n")
+                    "n"
                 };
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(response)?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Choose network:") => {
-                session.send_line("\n")?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                println!("Handling network choice prompt");
+                session.send_line("")?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Enter the network id:") => {
+                println!("Handling network ID prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
                 let network_id = deployment.resolve_network_to_number();
-                let response = format!("{}\n", network_id);
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&network_id.to_string())?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Please provide an rpc url") => {
+                println!("Handling RPC URL prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
-                let response = format!("{}\n", deployment.rpc_url);
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&deployment.rpc_url)?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Please provide a start block") => {
+                println!("Handling start block prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
                 let start_block = deployment.start_block.unwrap_or(0);
-                let response = format!("{}\n", start_block);
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&start_block.to_string())?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Would you like to import from a block explorer or a local abi?") => {
-                let response = match &contracts[*current_contract_idx].source {
-                    ContractSource::Explorer { .. } => String::from("1\n"),
-                    ContractSource::Abi { .. } => String::from("2\n"),
+                println!("Handling import source prompt");
+                match &contracts[*current_contract_idx].source {
+                    ContractSource::Explorer { .. } => session.send_line("1")?,
+                    ContractSource::Abi { .. } => session.send_line("2")?,
                 };
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("Which blockchain would you like to import a contract from?") => {
+                println!("Handling blockchain selection prompt");
                 let contract = &contracts[*current_contract_idx];
                 let deployment = &contract.deployments[*current_deployment_idx];
-                let response = format!("{}\n", deployment.resolve_network_to_string());
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&deployment.resolve_network_to_string())?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("What is the path to your json abi file?") => {
+                println!("Handling ABI path prompt");
                 let contract = &contracts[*current_contract_idx];
-                let response = format!("./abis/{}_abi.json\n", contract.name);
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&format!("./abis/{}_abi.json", contract.name))?;
+                session.exp_regex(r"\n")?;
             }
             s if s.contains("What is the name of this contract?") => {
+                println!("Handling contract name prompt");
                 let contract = &contracts[*current_contract_idx];
-                let response = format!("{}\n", contract.name);
-                session.send_line(&response)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_line(&contract.name)?;
+                session.exp_regex(r"\n")?;
             }
             _ => {
-                session.send_line("\n")?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                println!("Unhandled prompt: {}", prompt);
+                session.send_line("")?;
+                session.exp_regex(r"\n")?;
             }
-        };
+        }
 
         Ok(())
     }
-
-    // pub async fn init_project(
-    //     &self,
-    //     id: &str,
-    //     contracts: &[ContractConfig],
-    // ) -> Result<EnvioProject, EnvioError> {
-    //     let project_dir = self.base_dir.join(id);
-    //     std::fs::create_dir_all(&project_dir)?;
-
-    //     let selected_contracts = self.envio_selected_contracts(contracts);
-    //     let project_paths = ProjectPaths {
-    //         directory: project_dir.to_str().map(String::from),
-    //         output_directory: String::from(DEFAULT_GENERATED_PATH),
-    //         config: String::from(DEFAULT_CONFIG_PATH),
-    //     };
-
-    //     self.init(selected_contracts, &project_paths);
-
-    //     Ok(EnvioProject {
-    //         id: id.to_string(),
-    //         dir: project_dir,
-    //         process: None,
-    //     })
-    // }
-
-    // pub async fn envio_selected_contracts(
-    //     &self,
-    //     contracts: &[ContractConfig],
-    // ) -> Result<Vec<SelectedContract>, EnvioError> {
-    //     let mut selected_contracts = Vec::new();
-
-    //     for contract in contracts {
-    //         let abi_str = self.get_abi(contract).await?;
-    //         let abi: ethers::abi::Contract = serde_json::from_str(&abi_str)
-    //             .map_err(|e| EnvioError::ProcessFailed(format!("Failed to parse ABI: {}", e)))?;
-    //         let mut all_events = Vec::new();
-    //         let mut events_iter = abi.events();
-    //         while let Some(event) = events_iter.next() {
-    //             all_events.push(event.clone());
-    //         }
-
-    //         let networks = contract
-    //             .deployments
-    //             .iter()
-    //             .map(|deployment| {
-    //                 let network_id = deployment.network_id.parse().unwrap();
-    //                 let network = match Network::from_network_id(network_id) {
-    //                     Ok(network) => match HypersyncNetwork::try_from(network) {
-    //                         Ok(hypersync_network) => NetworkKind::Supported(hypersync_network),
-    //                         Err(_) => NetworkKind::Unsupported {
-    //                             network_id,
-    //                             rpc_url: deployment.rpc_url.clone(),
-    //                             start_block: deployment.start_block.unwrap_or(0),
-    //                         },
-    //                     },
-    //                     Err(_) => NetworkKind::Unsupported {
-    //                         network_id,
-    //                         rpc_url: deployment.rpc_url.clone(),
-    //                         start_block: deployment.start_block.unwrap_or(0),
-    //                     },
-    //                 };
-    //                 ContractImportNetworkSelection {
-    //                     network,
-    //                     addresses: vec![deployment.address.parse().unwrap()],
-    //                 }
-    //             })
-    //             .collect();
-
-    //         let selected_contract = SelectedContract {
-    //             name: contract.name.clone(),
-    //             networks,
-    //             events: all_events,
-    //         };
-
-    //         selected_contracts.push(selected_contract);
-    //     }
-
-    //     selected_contracts
-    // }
-
-    // pub async fn init(
-    //     &self,
-    //     name: String,
-    //     selected_contracts: Vec<SelectedContract>,
-    //     project_paths: &ProjectPaths,
-    // ) -> Result<(), EnvioError> {
-    //     let selected_contract_config = ContractImportSelection { selected_contracts };
-    //     let init_config = InitConfig {
-    //         name,
-    //         directory: project_paths.directory.unwrap_or_default(),
-    //         ecosystem: init_config::Ecosystem::Evm {
-    //             init_flow: InitFlow::ContractImport(selected_contract_config),
-    //         },
-    //         language: init_config::Language::TypeScript,
-    //         api_token: None,
-    //     };
-
-    //     let parsed_project_paths = ParsedProjectPaths::try_from(init_config.clone())
-    //         .context("Failed parsing paths from interactive input")?;
-
-    //     let evm_config = selected_contract_config
-    //         .to_human_config(&init_config)
-    //         .context("Failed to converting auto config selection into config.yaml")?;
-
-    //     // TODO: Allow parsed paths to not depend on a written config.yaml file in file system
-    //     tokio::fs::write(project_paths.join("config.yaml"), evm_config.to_string())
-    //         .await
-    //         .context("failed writing imported config.yaml")?;
-
-    //     //Use an empty schema config to generate auto_schema_handler_template
-    //     //After it's been generated, the schema exists and codegen can parse it/use it
-    //     let system_config =
-    //         SystemConfig::from_evm_config(evm_config, Schema::empty(), &parsed_project_paths)
-    //             .context("Failed parsing config")?;
-
-    //     let auto_schema_handler_template =
-    //         contract_import_templates::AutoSchemaHandlerTemplate::try_from(
-    //             system_config,
-    //             &init_config.language,
-    //             init_config.api_token.clone(),
-    //         )
-    //         .context("Failed converting config to auto auto_schema_handler_template")?;
-
-    //     template_dirs
-    //         .get_and_extract_blank_template(
-    //             &init_config.language,
-    //             &parsed_project_paths.project_root,
-    //         )
-    //         .context(format!(
-    //             "Failed initializing blank template for Contract Import with language {} at \
-    //        path {:?}",
-    //             &init_config.language, &parsed_project_paths.project_root,
-    //         ))?;
-
-    //     auto_schema_handler_template
-    //         .generate_contract_import_templates(
-    //             &init_config.language,
-    //             &parsed_project_paths.project_root,
-    //         )
-    //         .context(
-    //             "Failed generating contract import templates for schema and event handlers.",
-    //         )?;
-
-    //     Ok(())
-    // }
-
     async fn get_abi(&self, contract: &ContractConfig) -> Result<String, EnvioError> {
         match &contract.source {
             ContractSource::Abi { abi, url } => match (abi, url) {

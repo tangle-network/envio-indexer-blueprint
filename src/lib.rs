@@ -9,7 +9,7 @@ pub mod test_utils;
 mod tests {
     use super::*;
 
-    use envio_utils::{project::EnvioManager, ContractConfig, ContractSource, IndexerConfig};
+    use envio_utils::{project::EnvioManager, IndexerConfig};
     use http::{Request, Response};
     use jobs::spawn_indexer_kube;
     use kube::{api::Api, core::ObjectMeta, Client};
