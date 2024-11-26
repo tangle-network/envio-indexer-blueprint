@@ -122,7 +122,7 @@ version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4932d790c723181807738cf1ac68198ab581cd699545b155601332541ee47bd"
 dependencies = [
- "alloy-primitives 0.8.12",
+ "alloy-primitives 0.8.13",
  "num_enum",
  "strum",
 ]
@@ -210,7 +210,7 @@ version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b84c506bf264110fa7e90d9924f742f40ef53c6572ea56a0b0bd714a567ed389"
 dependencies = [
- "alloy-primitives 0.8.12",
+ "alloy-primitives 0.8.13",
  "alloy-sol-type-parser 0.8.12",
  "serde",
  "serde_json",
@@ -273,9 +273,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.8.12"
+version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fce5dbd6a4f118eecc4719eaa9c7ffc31c315e6c5ccde3642db927802312425"
+checksum = "3aeeb5825c2fc8c2662167058347cd0cafc3cb15bcb5cdb1758a63c2dca0409e"
 dependencies = [
  "alloy-rlp",
  "bytes",
@@ -622,7 +622,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6520d427d4a8eb7aa803d852d7a52ceb0c519e784c292f64bb339e636918cf27"
 dependencies = [
  "alloy-json-abi 0.8.12",
- "alloy-primitives 0.8.12",
+ "alloy-primitives 0.8.13",
  "alloy-sol-macro 0.8.12",
  "const-hex",
  "serde",
@@ -3492,7 +3492,7 @@ name = "envio-hyperindex-blueprint"
 version = "0.1.0"
 dependencies = [
  "alloy-json-abi 0.8.12",
- "alloy-primitives 0.8.12",
+ "alloy-primitives 0.8.13",
  "alloy-sol-types 0.8.12",
  "async-trait",
  "blueprint-metadata",
