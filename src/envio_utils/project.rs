@@ -127,13 +127,12 @@ impl EnvioManager {
         for contract in contracts.iter() {
             let abi = self.get_abi(contract).await?;
             let abi_path = abis_dir.join(format!("{}_abi.json", contract.name));
+            println!("Writing {:?}, ABI to file: {:?}", contract.name, abi_path);
             std::fs::write(&abi_path, abi)?;
         }
 
         // Clone the values needed for the blocking task
         let project_dir_clone = project_dir.clone();
-        let contracts_clone = contracts.to_vec();
-        let id_clone = id.to_string();
 
         tokio::task::spawn_blocking(move || {
             std::env::set_current_dir(&project_dir_clone)?;
@@ -147,6 +146,7 @@ impl EnvioManager {
             loop {
                 match Self::handle_envio_prompts(
                     &mut session,
+                    &project_dir_clone,
                     &contracts,
                     &mut current_contract_idx,
                     &mut current_deployment_idx,
@@ -180,28 +180,103 @@ impl EnvioManager {
 
     fn handle_envio_prompts(
         session: &mut rexpect::session::PtySession,
+        project_dir: &PathBuf,
         contracts: &[ContractConfig],
         current_contract_idx: &mut usize,
         current_deployment_idx: &mut usize,
     ) -> Result<(), EnvioError> {
-        let (_, prompt) = session.exp_regex(r"\?.*")?;
-        println!("Processing prompt: {}", prompt);
+        let mut prompt = String::new();
+        loop {
+            match session.read_line() {
+                Ok(line) => prompt.push_str(&format!("{}\n", line)),
+                Err(rexpect::error::Error::EOF { .. }) => break,
+                Err(_) => break,
+            }
+        }
 
-        match prompt.trim() {
+        let current_prompt = prompt
+            .lines()
+            .rev() // Look from the end
+            .find(|line| {
+                line.contains('?')
+                    || line.contains("Please input")
+                    || line.contains("Choose network")
+            })
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        // Find options in the prompt by looking for lines with brackets or numbers
+        let options: Vec<String> = prompt
+            .lines()
+            .filter(|line| {
+                line.contains('[') || line.trim().chars().next().map_or(false, |c| c.is_numeric())
+            })
+            .map(|s| s.trim().to_string())
+            .collect();
+
+        if !current_prompt.is_empty() {
+            println!("Current prompt: {}", current_prompt);
+        }
+
+        if !options.is_empty() {
+            println!("Available options:");
+            for option in options {
+                println!("  {}", option);
+            }
+        }
+
+        match current_prompt {
             s if s.contains("Specify a folder name") => {
                 println!("Handling folder name prompt");
-                session.send_line("")?;
-                session.exp_regex(r"\n")?;
+                session.send_control('u')?; // Clear line
+                session.send_control('m')?; // Send enter
             }
-            s if s.contains("Which language would you like to use?") => {
-                println!("Handling language prompt");
-                session.send_line("TypeScript")?;
-                session.exp_regex(r"\n")?;
+            s if s.contains("Which language would you like to use?")
+                || s.contains("Javascript")
+                || s.contains("Typescript")
+                || s.contains("ReScript") =>
+            {
+                println!("Handling language selection");
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                session.send_control('m')?;
             }
-            s if s.contains("Which events would you like to index?") => {
+            s if s.contains("Which events would you like to index?")
+                || (s.contains("space to select one") && s.contains("type to filter")) =>
+            {
                 println!("Handling events prompt");
-                session.send_line("")?;
-                session.exp_regex(r"\n")?;
+                session.send_line("\r")?;
+            }
+            s if s.contains("What is the path to your json abi file?") => {
+                let contract = &contracts[*current_contract_idx];
+                let abi_path = project_dir
+                    .join("abis")
+                    .join(format!("{}_abi.json", contract.name));
+                println!("ABI path: {:?}", abi_path);
+                session.send(abi_path.to_str().unwrap_or_default())?;
+                session.flush()?;
+                session.send_control('m')?;
+            }
+            s if s.contains("Choose network:") || s.contains("<Enter Network Id>") => {
+                println!("Handling network selection");
+                session.send_control('m')?;
+            }
+            s if s.contains("Enter the network id:") => {
+                println!("Handling network id prompt");
+                let contract = &contracts[*current_contract_idx];
+                let deployment = &contract.deployments[*current_deployment_idx];
+                session.send(&deployment.network_id.to_string())?;
+                session.flush()?;
+                session.send_control('m')?;
+            }
+            s if s.contains("What is the name of this contract?")
+                || s.contains("Use the proxy address if your abi is a proxy implementation") =>
+            {
+                println!("Handling contract name prompt");
+                let contract = &contracts[*current_contract_idx];
+                session.send(&contract.name)?;
+                session.flush()?;
+                session.send_control('m')?;
             }
             s if s.contains("What is the address of the contract?") => {
                 println!("Handling contract address prompt");
@@ -212,87 +287,27 @@ impl EnvioManager {
                 } else {
                     deployment.address.clone()
                 };
-                session.send_line(&address)?;
-                session.exp_regex(r"\n")?;
+                session.send(&address)?;
+                session.flush()?;
+                session.send_control('m')?;
             }
             s if s.contains("Would you like to add another contract?") => {
-                println!("Handling add contract prompt");
-                let contract = &contracts[*current_contract_idx];
-                let response = if *current_deployment_idx + 1 < contract.deployments.len() {
-                    *current_deployment_idx += 1;
-                    "y"
-                } else if *current_contract_idx + 1 < contracts.len() {
-                    *current_contract_idx += 1;
-                    *current_deployment_idx = 0;
-                    "y"
-                } else {
-                    "n"
-                };
-                session.send_line(response)?;
-                session.exp_regex(r"\n")?;
+                session.send_control('m')?;
             }
-            s if s.contains("Choose network:") => {
-                println!("Handling network choice prompt");
-                session.send_line("")?;
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("Enter the network id:") => {
-                println!("Handling network ID prompt");
-                let contract = &contracts[*current_contract_idx];
-                let deployment = &contract.deployments[*current_deployment_idx];
-                let network_id = deployment.resolve_network_to_number();
-                session.send_line(&network_id.to_string())?;
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("Please provide an rpc url") => {
-                println!("Handling RPC URL prompt");
-                let contract = &contracts[*current_contract_idx];
-                let deployment = &contract.deployments[*current_deployment_idx];
-                session.send_line(&deployment.rpc_url)?;
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("Please provide a start block") => {
-                println!("Handling start block prompt");
-                let contract = &contracts[*current_contract_idx];
-                let deployment = &contract.deployments[*current_deployment_idx];
-                let start_block = deployment.start_block.unwrap_or(0);
-                session.send_line(&start_block.to_string())?;
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("Would you like to import from a block explorer or a local abi?") => {
-                println!("Handling import source prompt");
-                match &contracts[*current_contract_idx].source {
-                    ContractSource::Explorer { .. } => session.send_line("1")?,
-                    ContractSource::Abi { .. } => session.send_line("2")?,
-                };
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("Which blockchain would you like to import a contract from?") => {
-                println!("Handling blockchain selection prompt");
-                let contract = &contracts[*current_contract_idx];
-                let deployment = &contract.deployments[*current_deployment_idx];
-                session.send_line(&deployment.resolve_network_to_string())?;
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("What is the path to your json abi file?") => {
-                println!("Handling ABI path prompt");
-                let contract = &contracts[*current_contract_idx];
-                session.send_line(&format!("./abis/{}_abi.json", contract.name))?;
-                session.exp_regex(r"\n")?;
-            }
-            s if s.contains("What is the name of this contract?") => {
-                println!("Handling contract name prompt");
-                let contract = &contracts[*current_contract_idx];
-                session.send_line(&contract.name)?;
-                session.exp_regex(r"\n")?;
+            s if s.contains("Add an API token for HyperSync to your .env file?") => {
+                println!("Handling HyperSync API token prompt");
+                session.send_line("\u{1B}[B")?; // Down arrow
+                session.send_control('m')?;
             }
             _ => {
-                println!("Unhandled prompt: {}", prompt);
-                session.send_line("")?;
-                session.exp_regex(r"\n")?;
+                if !current_prompt.is_empty() {
+                    println!("Unhandled prompt: {}", current_prompt);
+                    session.send_control('m')?;
+                }
             }
         }
 
+        std::thread::sleep(std::time::Duration::from_millis(20));
         Ok(())
     }
     async fn get_abi(&self, contract: &ContractConfig) -> Result<String, EnvioError> {
