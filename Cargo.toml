@@ -22,7 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["parking_lot", "env-filter"]
 serde_json = "1.0.133"
 serde = "1.0.215"
 lazy_static = "1.5.0"
-alloy-json-abi = "0.8.12"
+alloy-json-abi = "0.8.13"
 alloy-sol-types = "0.8.12"
 alloy-primitives = "0.8.12"
 tempfile = "3.14.0"
