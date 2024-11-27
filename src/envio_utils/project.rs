@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rexpect::spawn_bash;
+use rexpect::{process::signal::Signal, spawn_bash};
 // use expectrl::{spawn, Regex, Session, WaitStatus};
 use std::{io::Write, path::PathBuf};
 use thiserror::Error;
@@ -151,19 +151,34 @@ impl EnvioManager {
                     &mut current_contract_idx,
                     &mut current_deployment_idx,
                 ) {
-                    Ok(()) => continue,
+                    Ok(true) => {
+                        // If we're finished, kill the process directly instead of trying to exit cleanly
+                        println!("Project template ready");
+                        if let Err(e) = session.process.signal(Signal::SIGKILL) {
+                            println!("Warning: Failed to kill process: {}", e);
+                        }
+                        break;
+                    }
+                    Ok(false) => continue,
                     Err(EnvioError::RexpectError(rexpect::error::Error::EOF { .. })) => break,
                     Err(e) => return Err(e),
                 }
             }
 
+            println!("Waiting for envio process to exit...");
             let status = session.process.wait()?;
             match status {
-                rexpect::process::wait::WaitStatus::Exited(_, _) => (),
-                _ => {
+                rexpect::process::wait::WaitStatus::Signaled(pid, signal, code) => {
+                    println!(
+                        "Envio process (PID: {}) exited with signal {} code {}",
+                        pid, signal, code
+                    );
+                }
+                status => {
+                    println!("Envio process exited with unexpected status: {:?}", status);
                     return Err(EnvioError::ProcessFailed(
                         "Envio process exited unexpectedly".to_string(),
-                    ))
+                    ));
                 }
             }
 
@@ -184,7 +199,7 @@ impl EnvioManager {
         contracts: &[ContractConfig],
         current_contract_idx: &mut usize,
         current_deployment_idx: &mut usize,
-    ) -> Result<(), EnvioError> {
+    ) -> Result<bool, EnvioError> {
         let mut prompt = String::new();
         loop {
             match session.read_line() {
@@ -196,12 +211,8 @@ impl EnvioManager {
 
         let current_prompt = prompt
             .lines()
-            .rev() // Look from the end
-            .find(|line| {
-                line.contains('?')
-                    || line.contains("Please input")
-                    || line.contains("Choose network")
-            })
+            .rev()
+            .find(|line| line.contains('?'))
             .unwrap_or("")
             .trim()
             .to_string();
@@ -229,8 +240,14 @@ impl EnvioManager {
         match current_prompt {
             s if s.contains("Specify a folder name") => {
                 println!("Handling folder name prompt");
-                session.send_control('u')?; // Clear line
-                session.send_control('m')?; // Send enter
+                session.send(
+                    &project_dir
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                )?;
+                session.flush()?;
+                session.send_control('m')?;
             }
             s if s.contains("Which language would you like to use?")
                 || s.contains("Javascript")
@@ -238,14 +255,13 @@ impl EnvioManager {
                 || s.contains("ReScript") =>
             {
                 println!("Handling language selection");
-                std::thread::sleep(std::time::Duration::from_millis(100));
                 session.send_control('m')?;
             }
             s if s.contains("Which events would you like to index?")
                 || (s.contains("space to select one") && s.contains("type to filter")) =>
             {
                 println!("Handling events prompt");
-                session.send_line("\r")?;
+                session.send_control('m')?;
             }
             s if s.contains("What is the path to your json abi file?") => {
                 let contract = &contracts[*current_contract_idx];
@@ -292,13 +308,52 @@ impl EnvioManager {
                 session.send_control('m')?;
             }
             s if s.contains("Would you like to add another contract?") => {
+                println!("Handling add another contract prompt");
+                let contract = &contracts[*current_contract_idx];
+                let deployment = &contract.deployments[*current_deployment_idx];
+
+                // Check if there are more deployments for this contract
+                if *current_deployment_idx + 1 < contract.deployments.len() {
+                    let next_deployment = &contract.deployments[*current_deployment_idx + 1];
+                    *current_deployment_idx += 1;
+
+                    if next_deployment.network_id == deployment.network_id {
+                        // Same network, different address
+                        session.send("\x1B[B")?; // Down arrow once
+                    } else {
+                        // Different network
+                        session.send("\x1B[B")?; // Down arrow
+                        session.send("\x1B[B")?; // Down arrow again
+                    }
+                } else if *current_contract_idx + 1 < contracts.len() {
+                    // Move to next contract
+                    *current_contract_idx += 1;
+                    *current_deployment_idx = 0;
+                    session.send("\x1B[B")?; // Down arrow
+                    session.send("\x1B[B")?; // Down arrow
+                    session.send("\x1B[B")?; // Down arrow
+                }
+                session.flush()?;
                 session.send_control('m')?;
             }
-            s if s.contains("Add an API token for HyperSync to your .env file?") => {
+            s if s.contains("Add an API token for HyperSync to your .env file?")
+                | s.contains("Add your API token:") =>
+            {
                 println!("Handling HyperSync API token prompt");
-                session.send_line("\u{1B}[B")?; // Down arrow
+                session.send("\x1B[B")?;
+                session.send("\x1B[B")?;
+                session.flush()?;
                 session.send_control('m')?;
             }
+            s if s.contains("Project template ready") => {
+                println!("Handling project template ready prompt");
+                session.send_control('m')?;
+				return Ok(true)
+            }
+			s if s.contains("You can always visit 'https://envio.dev/app/api-tokens' and add a token later to your .env file.") => {
+				session.send_control('m')?;
+				return Ok(true)
+			}
             _ => {
                 if !current_prompt.is_empty() {
                     println!("Unhandled prompt: {}", current_prompt);
@@ -307,8 +362,7 @@ impl EnvioManager {
             }
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        Ok(())
+        Ok(false)
     }
     async fn get_abi(&self, contract: &ContractConfig) -> Result<String, EnvioError> {
         match &contract.source {
