@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rexpect::{process::signal::Signal, spawn_bash};
+use rexpect::{process::signal::Signal, spawn, spawn_bash};
 // use expectrl::{spawn, Regex, Session, WaitStatus};
 use std::{io::Write, path::PathBuf};
 use thiserror::Error;
@@ -136,8 +136,8 @@ impl EnvioManager {
 
         std::env::set_current_dir(&project_dir_clone)?;
 
-        let mut session = spawn_bash(Some(2000))?;
-        session.send_line("envio init contract-import local")?;
+        let mut session = spawn("envio init contract-import local", Some(2000))?;
+        // session.send_line("envio init contract-import local")?;
 
         let mut current_contract_idx = 0;
         let mut current_deployment_idx = 0;
@@ -160,7 +160,10 @@ impl EnvioManager {
                 }
                 Ok(false) => continue,
                 Err(EnvioError::RexpectError(rexpect::error::Error::EOF { .. })) => break,
-                Err(e) => return Err(e),
+                Err(e) => {
+                    println!("Error handling prompts: {:?}", e);
+                    return Err(e);
+                }
             }
         }
 
@@ -346,12 +349,13 @@ impl EnvioManager {
             s if s.contains("Project template ready") => {
                 println!("Handling project template ready prompt");
                 session.send_control('m')?;
-				return Ok(true)
+				        return Ok(true)
             }
-			s if s.contains("You can always visit 'https://envio.dev/app/api-tokens' and add a token later to your .env file.") => {
-				session.send_control('m')?;
-				return Ok(true)
-			}
+            s if s.contains("You can always visit 'https://envio.dev/app/api-tokens' and add a token later to your .env file.") => {
+              println!("Handling final prompt");
+              session.send_control('m')?;
+              return Ok(true)
+            }
             _ => {
                 if !current_prompt.is_empty() {
                     println!("Unhandled prompt: {}", current_prompt);
