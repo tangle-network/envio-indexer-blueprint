@@ -134,57 +134,55 @@ impl EnvioManager {
         // Clone the values needed for the blocking task
         let project_dir_clone = project_dir.clone();
 
-        tokio::task::spawn_blocking(move || {
-            std::env::set_current_dir(&project_dir_clone)?;
+        std::env::set_current_dir(&project_dir_clone)?;
 
-            let mut session = spawn_bash(Some(2000))?;
-            session.send_line("envio init contract-import local")?;
+        let mut session = spawn_bash(Some(2000))?;
+        session.send_line("envio init contract-import local")?;
 
-            let mut current_contract_idx = 0;
-            let mut current_deployment_idx = 0;
+        let mut current_contract_idx = 0;
+        let mut current_deployment_idx = 0;
 
-            loop {
-                match Self::handle_envio_prompts(
-                    &mut session,
-                    &project_dir_clone,
-                    &contracts,
-                    &mut current_contract_idx,
-                    &mut current_deployment_idx,
-                ) {
-                    Ok(true) => {
-                        // If we're finished, kill the process directly instead of trying to exit cleanly
-                        println!("Project template ready");
-                        if let Err(e) = session.process.signal(Signal::SIGKILL) {
-                            println!("Warning: Failed to kill process: {}", e);
-                        }
-                        break;
-                    }
-                    Ok(false) => continue,
-                    Err(EnvioError::RexpectError(rexpect::error::Error::EOF { .. })) => break,
-                    Err(e) => return Err(e),
+        loop {
+            match Self::handle_envio_prompts(
+                &mut session,
+                &project_dir_clone,
+                &contracts,
+                &mut current_contract_idx,
+                &mut current_deployment_idx,
+            ) {
+                Ok(true) => {
+                    // If we're finished, kill the process directly instead of trying to exit cleanly
+                    println!("Project template ready");
+                    session.send_control('c')?;
+                    session.send_line("exit")?;
+                    session.send_line("quit")?;
+                    break;
                 }
+                Ok(false) => continue,
+                Err(EnvioError::RexpectError(rexpect::error::Error::EOF { .. })) => break,
+                Err(e) => return Err(e),
             }
+        }
 
-            println!("Waiting for envio process to exit...");
-            let status = session.process.wait()?;
-            match status {
-                rexpect::process::wait::WaitStatus::Signaled(pid, signal, code) => {
-                    println!(
-                        "Envio process (PID: {}) exited with signal {} code {}",
-                        pid, signal, code
-                    );
-                }
-                status => {
-                    println!("Envio process exited with unexpected status: {:?}", status);
-                    return Err(EnvioError::ProcessFailed(
-                        "Envio process exited unexpectedly".to_string(),
-                    ));
-                }
+        println!("Waiting for envio process to exit...");
+        let status = session.process.wait()?;
+        match status {
+            rexpect::process::wait::WaitStatus::Signaled(pid, signal, code) => {
+                println!(
+                    "Envio process (PID: {}) exited with signal {} code {}",
+                    pid, signal, code
+                );
             }
-
-            Ok(())
-        })
-        .await??;
+            rexpect::process::wait::WaitStatus::Exited(pid, code) => {
+                println!("Envio process (PID: {}) exited with code {}", pid, code);
+            }
+            status => {
+                println!("Envio process exited with unexpected status: {:?}", status);
+                return Err(EnvioError::ProcessFailed(
+                    "Envio process exited unexpectedly".to_string(),
+                ));
+            }
+        }
 
         Ok(EnvioProject {
             id: id.to_string(),
