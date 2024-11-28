@@ -1,5 +1,5 @@
 pub mod definitions;
-pub use definitions::{NetworkInfo, NetworkTier, SUPPORTED_NETWORKS};
+pub use definitions::{NetworkInfo, SUPPORTED_NETWORKS};
 
 /// Validates if a network ID is supported and returns its information
 pub fn validate_network(network_id: u64) -> Result<&'static NetworkInfo, String> {
@@ -21,14 +21,6 @@ pub fn networks_with_traces() -> Vec<&'static NetworkInfo> {
         .collect()
 }
 
-/// Returns networks by tier
-pub fn networks_by_tier(tier: NetworkTier) -> Vec<&'static NetworkInfo> {
-    SUPPORTED_NETWORKS
-        .values()
-        .filter(|network| network.tier == tier)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,12 +38,5 @@ mod tests {
     fn test_networks_with_traces() {
         let trace_networks = networks_with_traces();
         assert!(trace_networks.iter().any(|n| n.network_id == 1)); // Ethereum should support traces
-    }
-
-    #[test]
-    fn test_networks_by_tier() {
-        let gold_networks = networks_by_tier(NetworkTier::Gold);
-        assert!(!gold_networks.is_empty());
-        assert!(gold_networks.iter().all(|n| n.tier == NetworkTier::Gold));
     }
 }
