@@ -22,17 +22,37 @@ tracing-subscriber = { version = "0.3", features = ["parking_lot", "env-filter"]
 serde_json = "1.0.133"
 serde = "1.0.215"
 lazy_static = "1.5.0"
-alloy-json-abi = "0.8.12"
+alloy-json-abi = { version = "0.8.12", features = ["serde_json"] }
 alloy-sol-types = "0.8.12"
 alloy-primitives = "0.8.12"
 tempfile = "3.14.0"
 uuid = "1.11.0"
 thiserror = "2.0.3"
+schemars = "0.8"
+kube = { version = "0.96.0", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.23.0", features = ["v1_31"] }
+gadget-sdk = { version = "0.4.0", default-features = false, features = ["getrandom"] }
+bytes = "1.8.0"
+reqwest = "0.12.9"
+wiremock = "0.6.2"
+fake = "3.0.1"
+rand = "0.8.5"
+regex = "1.11.1"
+envio = { git = "https://github.com/enviodev/hyperindex", branch = "main" }
+ethers = { version = "2.0.14" }
+anyhow = "1.0.93"
+expectrl = "0.7.1"
+enigo = "0.3.0"
+rexpect = "0.6.0"
 
-[dependencies.gadget-sdk]
-version = "0.4.0"
-default-features = false
-features = ["getrandom"]
+[dev-dependencies]
+k8s-openapi = { version = "0.23.0", features = ["v1_31"] }
+rustls = { version = "0.23.17", features = ["aws_lc_rs"] }
+aws-lc-rs = "1.11.0"
+tower-test = "0.4.0"
+http = "1.1.0"
+http-body-util = "0.1.2"
+hyper = "1.5.1"
 
 [build-dependencies]
 blueprint-metadata = "0.1.6"
