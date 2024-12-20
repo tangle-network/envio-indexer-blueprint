@@ -1847,13 +1847,13 @@ dependencies = [
 
 [[package]]
 name = "blueprint-metadata"
-version = "0.1.6"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f8754ff7a709cf0643f82093fff582192a36afe3b075cde8e752ad9e39d35ed"
+checksum = "900dab353f0e700c88c45bb5d0581fb0077034e3cec5f31bc6518a1852d4a0c2"
 dependencies = [
  "cargo_metadata",
  "fs2",
- "gadget-blueprint-proc-macro-core",
+ "gadget-blueprint-proc-macro-core 0.3.1",
  "rustdoc-types",
  "serde",
  "serde_json",
@@ -4535,7 +4535,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9279fa5ac3579da5e1c5467c395aae4c910cc63a702fcae097d529687398a4b7"
 dependencies = [
- "gadget-blueprint-proc-macro-core",
+ "gadget-blueprint-proc-macro-core 0.1.5",
  "indexmap 2.6.0",
  "itertools 0.13.0",
  "proc-macro2",
@@ -4549,6 +4549,17 @@ name = "gadget-blueprint-proc-macro-core"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "788b9e5ef537eea236c14f1a450ee92f7039b241d048f97470e8e8fb5be0319a"
+dependencies = [
+ "cid",
+ "ethereum-types",
+ "serde",
+]
+
+[[package]]
+name = "gadget-blueprint-proc-macro-core"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5b4e23d45df92230b91f451a832f196cbde06df44274d2746e22d7056b22ebf"
 dependencies = [
  "cid",
  "ethereum-types",
@@ -4623,7 +4634,7 @@ dependencies = [
  "failure",
  "futures",
  "gadget-blueprint-proc-macro",
- "gadget-blueprint-proc-macro-core",
+ "gadget-blueprint-proc-macro-core 0.1.5",
  "gadget-context-derive",
  "gadget-io",
  "getrandom",

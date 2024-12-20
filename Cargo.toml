@@ -57,7 +57,7 @@ http-body-util = "0.1.2"
 hyper = "1.5.1"
 
 [build-dependencies]
-blueprint-metadata = "0.1.6"
+blueprint-metadata = "0.2.1"
 
 [features]
 default = ["std"]
