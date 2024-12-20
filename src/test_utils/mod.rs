@@ -7,111 +7,14 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use tempfile::TempDir;
 
+pub mod erc20_abi;
+pub mod greeter_abi;
+
+pub use erc20_abi::ERC20_ABI;
+pub use greeter_abi::GREETER_ABI;
+
 // Common network IDs used across test functions
 const COMMON_NETWORK_IDS: &[&str] = &["1", "10", "137", "42161", "43114"];
-const DEFAULT_ABI: &str = r#"[
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "_greeting",
-        "type": "string"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
-  {
-    "inputs": [],
-    "name": "GreeterError",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      }
-    ],
-    "name": "ClearGreeting",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "user",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "greeting",
-        "type": "string"
-      }
-    ],
-    "name": "NewGreeting",
-    "type": "event"
-  },
-  {
-    "inputs": [],
-    "name": "clearGreeting",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "greet",
-    "outputs": [
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "greeting",
-    "outputs": [
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "_greeting",
-        "type": "string"
-      }
-    ],
-    "name": "setGreeting",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "throwError",
-    "outputs": [],
-    "stateMutability": "pure",
-    "type": "function"
-  }
-]"#;
 
 // Random data generation utilities
 pub fn generate_random_address() -> String {
@@ -170,7 +73,7 @@ pub fn create_test_contract(name: &str, network_id: &str) -> ContractConfig {
     ContractConfig::new(
         name.to_string(),
         ContractSource::Abi {
-            abi: Some(DEFAULT_ABI.to_string()),
+            abi: Some(GREETER_ABI.to_string()),
             url: None,
         },
         vec![create_deployment(
@@ -205,7 +108,7 @@ pub fn generate_random_contract_config() -> ContractConfig {
 
     let source = if rng.gen_bool(0.5) {
         ContractSource::Abi {
-            abi: Some(DEFAULT_ABI.to_string()),
+            abi: Some(GREETER_ABI.to_string()),
             url: None,
         }
     } else {
@@ -237,7 +140,7 @@ pub fn generate_multi_chain_contract() -> ContractConfig {
     ContractConfig::new(
         generate_random_contract_name(),
         ContractSource::Abi {
-            abi: Some(DEFAULT_ABI.to_string()),
+            abi: Some(GREETER_ABI.to_string()),
             url: None,
         },
         COMMON_NETWORK_IDS
@@ -251,7 +154,7 @@ pub fn generate_multi_address_contract(network_id: &str, num_addresses: usize) -
     ContractConfig::new(
         generate_random_contract_name(),
         ContractSource::Abi {
-            abi: Some(DEFAULT_ABI.to_string()),
+            abi: Some(GREETER_ABI.to_string()),
             url: None,
         },
         (0..num_addresses)

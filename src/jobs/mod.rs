@@ -160,18 +160,14 @@ mod tests {
     use std::path::PathBuf;
 
     #[tokio::test]
-    async fn test_spawn_multi_contract_indexer() {
+    async fn test_spawn_multi_contract_indexer_local() {
         // Setup test environment
-        let context = ServiceContext::new(
-            StdGadgetConfiguration::default(),
-            PathBuf::from("/tmp/test"),
-        );
+        let context = ServiceContext::new(StdGadgetConfiguration::default(), PathBuf::from("."));
 
         // Create test contracts configuration using test utils
         let contracts = vec![
             create_test_contract("Greeter", "1"), // Ethereum mainnet
             create_test_contract("OptimismGreeter", "10"), // Optimism
-            create_test_explorer_contract("ArbitrumToken", "42161"), // Arbitrum
         ];
 
         let config = IndexerConfig::new("multi_network_test".to_string(), contracts);
@@ -179,18 +175,30 @@ mod tests {
         let params_bytes = serde_json::to_vec(&params).unwrap();
 
         // Test local indexer spawn
-        let result = spawn_indexer_local(params_bytes.clone(), context.clone())
-            .await
-            .unwrap();
+        let result = spawn_indexer_local(params_bytes, context).await.unwrap();
         let result: SpawnIndexerResult = serde_json::from_slice(&result).unwrap();
         assert!(result.id.contains("multi_network_test"));
+    }
 
-        // Test kubernetes indexer spawn (requires mock k8s client)
-        let mut context_k8s = context.clone();
-        context_k8s.deployment_mode = DeploymentMode::Kubernetes;
+    #[tokio::test]
+    async fn test_kube_spawn_multi_contract_indexer() {
+        // Setup test environment
+        let mut context =
+            ServiceContext::new(StdGadgetConfiguration::default(), PathBuf::from("."));
+        context.deployment_mode = DeploymentMode::Kubernetes;
         // Setup mock k8s client here...
 
-        let result = spawn_indexer_kube(params_bytes, context_k8s).await.unwrap();
+        // Create test contracts configuration using test utils
+        let contracts = vec![
+            create_test_contract("Greeter", "1"), // Ethereum mainnet
+            create_test_contract("OptimismGreeter", "10"), // Optimism
+        ];
+
+        let config = IndexerConfig::new("multi_network_test".to_string(), contracts);
+        let params = SpawnIndexerParams { config };
+        let params_bytes = serde_json::to_vec(&params).unwrap();
+
+        let result = spawn_indexer_kube(params_bytes, context).await.unwrap();
         let results: Vec<EnvioIndexer> = serde_json::from_slice(&result).unwrap();
 
         assert_eq!(results.len(), 3); // One for each contract

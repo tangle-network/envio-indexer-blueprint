@@ -13,6 +13,30 @@ pub enum ContractSource {
     },
 }
 
+impl ContractSource {
+    pub fn is_explorer(&self) -> bool {
+        matches!(self, ContractSource::Explorer { .. })
+    }
+
+    pub fn is_abi(&self) -> bool {
+        matches!(self, ContractSource::Abi { .. })
+    }
+
+    pub fn get_abi(&self) -> Option<String> {
+        match self {
+            ContractSource::Abi { abi, .. } => abi.clone(),
+            _ => None,
+        }
+    }
+
+    pub fn get_url(&self) -> Option<String> {
+        match self {
+            ContractSource::Abi { url, .. } => url.clone(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ContractDeployment {
     pub network_id: String,

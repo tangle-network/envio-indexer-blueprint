@@ -133,21 +133,24 @@ mod tests {
         let deployment = create_envio_deployment_config(&spec, "default");
         let env = &deployment.container.env;
 
-        // Verify environment variables
+        // Verify environment variables with actual addresses from test_utils
         assert!(env.iter().any(|(k, v)| k == "BLOCKCHAIN" && v == "1"));
         assert!(env.iter().any(|(k, v)| k == "BLOCKCHAIN_1" && v == "10"));
         assert!(env
             .iter()
-            .any(|(k, v)| k == "CONTRACT_ADDRESS" && v == "0x123"));
+            .any(|(k, v)| k == "CONTRACT_ADDRESS"
+                && v == "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"));
         assert!(env
             .iter()
-            .any(|(k, v)| k == "CONTRACT_ADDRESS_1" && v == "0x456"));
+            .any(|(k, v)| k == "CONTRACT_ADDRESS_1"
+                && v == "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
         assert!(env
             .iter()
-            .any(|(k, v)| k == "PROXY_ADDRESS_1" && v == "0x789"));
+            .any(|(k, v)| k == "PROXY_ADDRESS_1"
+                && v == "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"));
         assert!(env
             .iter()
-            .any(|(k, v)| k == "OPTIMISM_API_KEY" && v == "test_key"));
+            .any(|(k, v)| k == "OPTIMISM_VERIFIED_CONTRACT_API_TOKEN" && v == "test_key"));
         assert!(env.iter().any(|(k, v)| k == "NUM_CONTRACTS" && v == "2"));
     }
 }

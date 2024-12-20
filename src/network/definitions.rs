@@ -36,9 +36,6 @@ macro_rules! define_networks {
     };
 }
 
-// Define all supported networks
-// ... existing code up to define_networks! macro ...
-
 define_networks! {
   42161 => {
       name: "Arbitrum",

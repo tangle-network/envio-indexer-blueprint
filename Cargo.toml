@@ -38,7 +38,6 @@ wiremock = "0.6.2"
 fake = "3.0.1"
 rand = "0.8.5"
 regex = "1.11.1"
-envio = { git = "https://github.com/enviodev/hyperindex", branch = "main" }
 ethers = { version = "2.0.14" }
 anyhow = "1.0.93"
 enigo = "0.3.0"
@@ -46,6 +45,7 @@ rexpect = "0.6.0"
 bollard = "0.16.1"
 futures = "0.3.31"
 testcontainers = "0.20.0"
+chrono = "0.4.39"
 
 [dev-dependencies]
 k8s-openapi = { version = "0.23.0", features = ["v1_31"] }

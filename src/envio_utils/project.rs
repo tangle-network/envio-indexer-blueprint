@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tokio::process::{Child, Command};
 
+use crate::network::SUPPORTED_NETWORKS;
+
 use super::config::{ContractConfig, ContractSource};
 use super::docker::EnvioDocker;
 
@@ -164,6 +166,8 @@ impl EnvioManager {
         let mut current_contract_idx = 0;
         let mut current_deployment_idx = 0;
 
+        let mut success = false;
+
         loop {
             match Self::handle_envio_prompts(
                 &mut session,
@@ -171,7 +175,10 @@ impl EnvioManager {
                 &contracts,
                 &mut current_contract_idx,
                 &mut current_deployment_idx,
-            ) {
+                &mut success,
+            )
+            .await
+            {
                 Ok(true) => {
                     // If we're finished, kill the process directly instead of trying to exit cleanly
                     println!("Project template ready");
@@ -186,8 +193,13 @@ impl EnvioManager {
                     EnvioError::RexpectError(rexpect::error::Error::Io(err))
                         if err.raw_os_error() == Some(5) =>
                     {
-                        println!("Gracefully handling I/O error");
-                        break;
+                        if success {
+                            break;
+                        } else {
+                            return Err(EnvioError::ProcessFailed(
+                                "Envio process exited unexpectedly".to_string(),
+                            ));
+                        }
                     }
                     _ => return Err(e),
                 },
@@ -214,9 +226,21 @@ impl EnvioManager {
             }
         }
         println!("Envio process completed, verifying project setup...");
+        let current_dir = std::env::current_dir()?;
+        println!("Current dir: {:?}", current_dir);
 
-        // Verify the project directory structure
+        // Since we're already in the project directory, just use current_dir
+        let project_dir = current_dir;
+
+        println!("Project dir: {:?}", project_dir);
+        println!("Project dir exists: {:?}", project_dir.exists());
+
+        // Use current directory for config file check
         let config_path = project_dir.join("config.yaml");
+        println!("Config path: {:?}", config_path);
+        println!("Config path exists: {:?}", config_path.exists());
+        println!("Config path is file: {:?}", config_path.is_file());
+
         if !config_path.exists() {
             return Err(EnvioError::InvalidState(
                 "Project initialization failed: config.yaml not created".into(),
@@ -231,12 +255,13 @@ impl EnvioManager {
         })
     }
 
-    fn handle_envio_prompts(
+    async fn handle_envio_prompts(
         session: &mut rexpect::session::PtySession,
         project_dir: &PathBuf,
         contracts: &[ContractConfig],
         current_contract_idx: &mut usize,
         current_deployment_idx: &mut usize,
+        success: &mut bool,
     ) -> Result<bool, EnvioError> {
         let mut prompt = String::new();
         loop {
@@ -298,12 +323,47 @@ impl EnvioManager {
             }
             s if s.contains("What is the path to your json abi file?") => {
                 let contract = &contracts[*current_contract_idx];
-                let abi_path = project_dir
-                    .join("abis")
-                    .join(format!("{}_abi.json", contract.name));
-                println!("ABI path: {:?}", abi_path);
-                session.send(abi_path.to_str().unwrap_or_default())?;
+                let abi_path = format!("./abis/{}_abi.json", contract.name);
+
+                session.send(&abi_path)?;
                 session.flush()?;
+                session.send_control('m')?;
+            }
+            s if s.contains("Would you like to import from a block explorer or a local abi") => {
+                println!("Handling block explorer vs local ABI prompt");
+                let contract = &contracts[*current_contract_idx];
+
+                if contract.source.is_explorer() {
+                    // For block explorer, just hit enter
+                    session.send_control('m')?;
+                } else {
+                    // For local ABI, arrow down and hit enter
+                    session.send("\x1B[B")?; // Down arrow
+                    session.send_control('m')?;
+                }
+            }
+            s if s.contains("Which blockchain would you like to import a contract from?") => {
+                println!("Handling blockchain selection");
+                let contract = &contracts[*current_contract_idx];
+                let network_id: u64 = (&contract.deployments[*current_deployment_idx].network_id).parse().unwrap_or_default();
+                // Get the network info from definitions
+                let network_info = crate::network::definitions::SUPPORTED_NETWORKS
+                    .get(&network_id)
+                    .expect("Network ID not found in supported networks");
+
+                // Convert network name to lowercase and convert spaces to hyphens
+                let network_name = network_info.name.to_lowercase().replace(' ', "-");
+
+                // Find index in CHAIN_LIST
+                let chain_idx = crate::envio_utils::CHAIN_LIST
+                    .iter()
+                    .position(|&x| x == network_name)
+                    .expect("Network not found in chain list");
+
+                // Send down arrow key chain_idx times
+                for _ in 0..chain_idx {
+                    session.send("\x1B[B")?; // Down arrow
+                }
                 session.send_control('m')?;
             }
             s if s.contains("Choose network:") || s.contains("<Enter Network Id>") => {
@@ -385,6 +445,7 @@ impl EnvioManager {
             }
             s if s.contains("You can always visit 'https://envio.dev/app/api-tokens' and add a token later to your .env file.") => {
               println!("Handling final prompt");
+              *success = true;
               session.send_control('m')?;
               return Ok(true)
             }
@@ -482,5 +543,9 @@ mod tests {
 
         // Clean up
         manager.stop_docker().await.unwrap();
+
+        // Clean up project directory
+        std::fs::remove_dir_all(&project.dir).unwrap();
+        assert!(!project.dir.exists(), "Project directory should be removed");
     }
 }
