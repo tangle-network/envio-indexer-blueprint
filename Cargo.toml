@@ -23,7 +23,7 @@ tempfile = "3.13"
 uuid = "1.11.0"
 thiserror = "2.0.3"
 schemars = "0.8"
-kube = { version = "0.96.0", features = ["runtime", "derive"] }
+kube = { version = "0.98.0", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.23.0", features = ["v1_31"] }
 blueprint-sdk = { git = "https://github.com/tangle-network/gadget", features = ["tangle", "evm", "macros", "local-store"] }
 bytes = "1.8.0"
