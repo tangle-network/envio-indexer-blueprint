@@ -9,6 +9,10 @@ pub mod test_utils;
 mod tests {
     use super::*;
 
+    use blueprint_sdk::std::sync::Arc;
+    use blueprint_sdk::std::{collections::HashMap, path::PathBuf};
+    use blueprint_sdk::tokio;
+    use blueprint_sdk::tokio::sync::RwLock;
     use envio_utils::{project::EnvioManager, IndexerConfig};
     use http::{Request, Response};
     use jobs::spawn_indexer_kube;
@@ -18,10 +22,7 @@ mod tests {
         K8sManager,
     };
     use service_context::{DeploymentMode, ServiceContext, SpawnIndexerParams};
-    use std::sync::Arc;
-    use std::{collections::HashMap, path::PathBuf};
     use test_utils::create_test_contract;
-    use tokio::sync::RwLock;
     use tower_test::mock;
 
     // Mock types for unit testing
@@ -34,7 +35,8 @@ mod tests {
         let client = Client::new(mock_service, "test-namespace");
 
         let context = ServiceContext {
-            config: gadget_sdk::config::StdGadgetConfiguration::default(),
+            config: blueprint_sdk::config::StdGadgetConfiguration::default(),
+            call_id: None,
             indexers: Arc::new(RwLock::new(HashMap::new())),
             envio_manager: Arc::new(EnvioManager::new(PathBuf::from("/tmp"))),
             deployment_mode: DeploymentMode::Kubernetes,
@@ -52,6 +54,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires kubernetes cluster"]
     async fn test_spawn_indexer_kube_mock() {
         let (context, mut handle) = setup_mock_context().await;
 
@@ -98,7 +101,8 @@ mod tests {
     async fn test_spawn_indexer_kube_integration() {
         let client = Client::try_default().await.unwrap();
         let context = ServiceContext {
-            config: gadget_sdk::config::StdGadgetConfiguration::default(),
+            config: blueprint_sdk::config::StdGadgetConfiguration::default(),
+            call_id: None,
             indexers: Arc::new(RwLock::new(HashMap::new())),
             envio_manager: Arc::new(EnvioManager::new(PathBuf::from("/tmp"))),
             deployment_mode: DeploymentMode::Kubernetes,

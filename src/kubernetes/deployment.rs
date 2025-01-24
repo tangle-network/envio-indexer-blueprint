@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::BTreeMap;
+use blueprint_sdk::std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceConfig {
@@ -180,6 +180,7 @@ impl ResourceManager for DeploymentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blueprint_sdk::tokio;
     use kube::{Client, Config};
     use rustls::crypto::aws_lc_rs::default_provider;
 

@@ -1,6 +1,6 @@
+use blueprint_sdk::std::collections::HashMap;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInfo {

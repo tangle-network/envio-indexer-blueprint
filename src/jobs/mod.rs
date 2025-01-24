@@ -6,10 +6,11 @@ use crate::{
     },
     service_context::SpawnIndexerParams,
 };
-use gadget_sdk::event_listener::tangle::jobs::services_pre_processor;
-use gadget_sdk::event_listener::tangle::TangleEventListener;
-use gadget_sdk::job;
-use gadget_sdk::tangle_subxt::tangle_testnet_runtime::api::services::events::JobCalled;
+use blueprint_sdk::event_listeners::tangle::{
+    events::TangleEventListener, services::services_pre_processor,
+};
+use blueprint_sdk::job;
+use blueprint_sdk::tangle_subxt::tangle_testnet_runtime::api::services::events::JobCalled;
 use k8s_openapi::{apimachinery::pkg::apis::meta::v1::Time, chrono};
 
 use crate::service_context::ServiceContext;
@@ -154,9 +155,9 @@ mod tests {
     use crate::{
         envio_utils::IndexerConfig,
         service_context::{DeploymentMode, SpawnIndexerResult},
-        test_utils::{create_test_contract, create_test_explorer_contract},
+        test_utils::create_test_contract,
     };
-    use gadget_sdk::config::StdGadgetConfiguration;
+    use blueprint_sdk::{config::StdGadgetConfiguration, tokio};
     use std::path::PathBuf;
 
     #[tokio::test]
@@ -181,6 +182,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires kubernetes cluster"]
     async fn test_kube_spawn_multi_contract_indexer() {
         // Setup test environment
         let mut context =

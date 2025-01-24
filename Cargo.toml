@@ -13,38 +13,30 @@ keywords = ["tangle", "blueprint", "avs"]
 rust-version = "1.81"
 
 [dependencies]
-tracing = "0.1"
 async-trait = "0.1"
 color-eyre = "0.6"
 structopt = "0.3.26"
-tokio = { version = "^1", default-features = false, features = ["full"] }
-tracing-subscriber = { version = "0.3", features = ["parking_lot", "env-filter"] }
 serde_json = "1.0.133"
 serde = "1.0.215"
 lazy_static = "1.5.0"
-alloy-json-abi = { version = "0.8.12", features = ["serde_json"] }
-alloy-sol-types = "0.8.12"
-alloy-primitives = "0.8.12"
-tempfile = "3.14.0"
+tempfile = "3.13"
 uuid = "1.11.0"
 thiserror = "2.0.3"
 schemars = "0.8"
 kube = { version = "0.96.0", features = ["runtime", "derive"] }
 k8s-openapi = { version = "0.23.0", features = ["v1_31"] }
-gadget-sdk = { version = "0.4.0", default-features = false, features = ["getrandom"] }
+blueprint-sdk = { git = "https://github.com/tangle-network/gadget", features = ["tangle", "evm", "macros", "local-store"] }
 bytes = "1.8.0"
 reqwest = "0.12.9"
 wiremock = "0.6.2"
 fake = "3.0.1"
 rand = "0.8.5"
 regex = "1.11.1"
-ethers = { version = "2.0.14" }
 anyhow = "1.0.93"
-enigo = "0.3.0"
 rexpect = "0.6.0"
-bollard = "0.16.1"
+bollard = "0.17"
 futures = "0.3.31"
-testcontainers = "0.20.0"
+testcontainers = "0.23.0"
 chrono = "0.4.39"
 
 [dev-dependencies]
@@ -61,7 +53,7 @@ blueprint-metadata = "0.1.6"
 
 [features]
 default = ["std"]
-std = ["gadget-sdk/std"]
+std = ["blueprint-sdk/std"]
 
 [lib]
 path = "src/lib.rs"

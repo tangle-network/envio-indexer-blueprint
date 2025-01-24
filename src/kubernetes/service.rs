@@ -1,8 +1,8 @@
-use std::fmt::Debug;
-
 use super::*;
+use blueprint_sdk::std::fmt::Debug;
+use blueprint_sdk::tokio::time::{sleep, Duration};
 use deployment::DeploymentConfig;
-use gadget_sdk::futures::TryStreamExt;
+use futures::TryStreamExt;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::chrono;
 use kube::api::{Patch, PatchParams};
@@ -11,7 +11,6 @@ use kube::runtime::watcher::{watcher, Config, Event};
 use kube::Resource;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
-use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimeWrapper(pub Time);
@@ -149,7 +148,10 @@ where
                     match event {
                         Event::Apply(svc) => {
                             if let Err(e) = self.reconcile_service(&svc).await {
-                                tracing::error!("Failed to reconcile service: {}", e);
+                                blueprint_sdk::logging::error!(
+                                    "Failed to reconcile service: {}",
+                                    e
+                                );
                             }
                         }
                         Event::Delete(_) => {}

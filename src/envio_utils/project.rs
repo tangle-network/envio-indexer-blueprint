@@ -1,14 +1,10 @@
-use anyhow::Result;
-use rexpect::spawn;
-// use expectrl::{spawn, Regex, Session, WaitStatus};
-use std::path::PathBuf;
-use thiserror::Error;
-use tokio::process::{Child, Command};
-
-use crate::network::SUPPORTED_NETWORKS;
-
 use super::config::{ContractConfig, ContractSource};
 use super::docker::EnvioDocker;
+use anyhow::Result;
+use blueprint_sdk::std::path::PathBuf;
+use blueprint_sdk::tokio::process::{Child, Command};
+use rexpect::spawn;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum EnvioError {
@@ -26,10 +22,8 @@ pub enum EnvioError {
     ReqwestError(#[from] reqwest::Error),
     #[error("Serde JSON error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
-    #[error("Enigo error: {0}")]
-    EnigoError(#[from] enigo::InputError),
     #[error("Join error: {0}")]
-    JoinError(#[from] tokio::task::JoinError),
+    JoinError(#[from] blueprint_sdk::tokio::task::JoinError),
     #[error("rexpect error: {0}")]
     RexpectError(#[from] rexpect::error::Error),
 }
@@ -171,7 +165,6 @@ impl EnvioManager {
         loop {
             match Self::handle_envio_prompts(
                 &mut session,
-                &project_dir_clone,
                 &contracts,
                 &mut current_contract_idx,
                 &mut current_deployment_idx,
@@ -257,7 +250,6 @@ impl EnvioManager {
 
     async fn handle_envio_prompts(
         session: &mut rexpect::session::PtySession,
-        project_dir: &PathBuf,
         contracts: &[ContractConfig],
         current_contract_idx: &mut usize,
         current_deployment_idx: &mut usize,
@@ -495,6 +487,7 @@ async fn fetch_abi_from_url(url: &str) -> Result<String, EnvioError> {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_contract;
+    use blueprint_sdk::tokio;
 
     #[tokio::test]
     async fn test_project_lifecycle() {

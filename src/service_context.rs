@@ -1,11 +1,12 @@
+use blueprint_sdk::macros::contexts::TangleClientContext;
+use blueprint_sdk::std::collections::HashMap;
+use blueprint_sdk::std::path::PathBuf;
+use blueprint_sdk::std::sync::Arc;
+use blueprint_sdk::tokio::process::Child;
+use blueprint_sdk::tokio::sync::RwLock;
+use blueprint_sdk::{config::StdGadgetConfiguration, macros::contexts::ServicesContext};
 use envio_utils::{EnvioManager, EnvioProject};
-use gadget_sdk::config::StdGadgetConfiguration;
 use schemars::JsonSchema;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::process::Child;
-use tokio::sync::RwLock;
 
 use crate::{
     envio_utils::{self, IndexerConfig},
@@ -49,9 +50,12 @@ pub enum DeploymentMode {
     Kubernetes,
 }
 
-#[derive(Clone)]
+#[derive(Clone, ServicesContext, TangleClientContext)]
 pub struct ServiceContext {
+    #[config]
     pub config: StdGadgetConfiguration,
+    #[call_id]
+    pub call_id: Option<u64>,
     pub indexers: Arc<RwLock<HashMap<String, IndexerProcess>>>,
     pub envio_manager: Arc<EnvioManager>,
     pub deployment_mode: DeploymentMode,
@@ -62,6 +66,7 @@ impl ServiceContext {
     pub fn new(config: StdGadgetConfiguration, data_dir: PathBuf) -> Self {
         Self {
             config,
+            call_id: None,
             indexers: Arc::new(RwLock::new(HashMap::new())),
             envio_manager: Arc::new(EnvioManager::new(data_dir)),
             deployment_mode: DeploymentMode::Local,
