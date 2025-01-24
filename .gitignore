@@ -33,3 +33,5 @@ docs/
 # Generated blueprint files
 blueprint.json
 blueprint.lock
+
+indexer_multi_network_test_*
