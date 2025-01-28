@@ -46,7 +46,7 @@ aws-lc-rs = "1.11.0"
 tower-test = "0.4.0"
 http = "1.1.0"
 http-body-util = "0.1.2"
-hyper = "1.5.1"
+hyper = "1.6.0"
 
 [build-dependencies]
 blueprint-metadata = "0.1.6"
