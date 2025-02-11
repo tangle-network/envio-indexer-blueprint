@@ -41,7 +41,7 @@ chrono = "0.4.39"
 
 [dev-dependencies]
 k8s-openapi = { version = "0.23.0", features = ["v1_31"] }
-rustls = { version = "0.23.17", features = ["aws_lc_rs"] }
+rustls = { version = "0.23.23", features = ["aws_lc_rs"] }
 aws-lc-rs = "1.11.0"
 tower-test = "0.4.0"
 http = "1.1.0"
