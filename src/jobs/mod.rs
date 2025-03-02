@@ -1,17 +1,9 @@
-use crate::{
-    envio_utils::IndexerConfig,
-    kubernetes::{
-        envio::{EnvioIndexer, EnvioIndexerSpec},
-        service::{ServicePhase, ServiceStatus, TimeWrapper},
-    },
-    service_context::SpawnIndexerParams,
-};
+use crate::service_context::SpawnIndexerParams;
 use blueprint_sdk::event_listeners::tangle::{
     events::TangleEventListener, services::services_pre_processor,
 };
 use blueprint_sdk::job;
 use blueprint_sdk::tangle_subxt::tangle_testnet_runtime::api::services::events::JobCalled;
-use k8s_openapi::{apimachinery::pkg::apis::meta::v1::Time, chrono};
 
 use crate::service_context::ServiceContext;
 
@@ -36,72 +28,10 @@ pub async fn spawn_indexer_local(
     // Use existing EnvioManager implementation
     let result = context.spawn_indexer(params.config).await?;
 
+    // Start the indexer
+    let result = context.start_indexer(&result.id).await?;
+
     serde_json::to_vec(&result).map_err(|e| format!("Failed to serialize result: {}", e))
-}
-
-#[job(
-  id = 1,
-  params(params),
-  event_listener(
-      listener = TangleEventListener::<ServiceContext, JobCalled>,
-      pre_processor = services_pre_processor,
-  ),
-)]
-pub async fn spawn_indexer_kube(
-    params: Vec<u8>,
-    context: ServiceContext,
-) -> Result<Vec<u8>, String> {
-    let params = serde_json::from_slice::<SpawnIndexerParams>(&params)
-        .map_err(|e| format!("Failed to parse params: {}", e))?;
-
-    // Validate the configuration
-    params.config.validate()?;
-
-    // Create EnvioIndexer CRD for each contract
-    let indexers = params
-        .config
-        .contracts
-        .into_iter()
-        .map(|contract| EnvioIndexer {
-            metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
-                name: Some(format!(
-                    "{}-{}",
-                    params.config.name,
-                    contract.name.to_lowercase()
-                )),
-                namespace: context
-                    .k8s_manager
-                    .clone()
-                    .map(|m| m.namespace().to_string()),
-                ..Default::default()
-            },
-            spec: EnvioIndexerSpec {
-                config: IndexerConfig {
-                    name: contract.name.clone(),
-                    contracts: vec![contract],
-                },
-            },
-            status: Some(ServiceStatus {
-                phase: ServicePhase::Starting,
-                message: Some("Indexer starting".to_string()),
-                last_updated: Some(TimeWrapper(Time(chrono::Utc::now()))),
-            }),
-        })
-        .collect::<Vec<_>>();
-
-    // Deploy using K8s manager
-    let manager = context
-        .k8s_manager
-        .ok_or_else(|| "K8s manager not initialized".to_string())?
-        .service::<EnvioIndexer>();
-
-    let mut results = Vec::new();
-    for indexer in indexers {
-        let result = manager.create(&indexer).await.map_err(|e| e.to_string())?;
-        results.push(result);
-    }
-
-    serde_json::to_vec(&results).map_err(|e| format!("Failed to serialize results: {}", e))
 }
 
 #[job(
@@ -123,47 +53,21 @@ pub async fn stop_indexer_local(
     Ok(format!("Successfully stopped indexer {}", id).into_bytes())
 }
 
-#[job(
-    id = 3,
-    params(params),
-    event_listener(
-        listener = TangleEventListener::<ServiceContext, JobCalled>,
-        pre_processor = services_pre_processor,
-    ),
-)]
-pub async fn stop_indexer_kube(
-    params: Vec<u8>,
-    context: ServiceContext,
-) -> Result<Vec<u8>, String> {
-    let id = String::from_utf8(params).map_err(|e| format!("Failed to parse indexer ID: {}", e))?;
-
-    // Get K8s manager
-    let manager = context
-        .k8s_manager
-        .ok_or_else(|| "K8s manager not initialized".to_string())?
-        .service::<EnvioIndexer>();
-
-    // Delete the EnvioIndexer resource
-    manager.delete(&id).await.map_err(|e| e.to_string())?;
-
-    Ok(format!("Successfully stopped indexer {}", id).into_bytes())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        envio_utils::IndexerConfig,
-        service_context::{DeploymentMode, SpawnIndexerResult},
+        envio_utils::{ContractConfig, ContractDeployment, ContractSource, IndexerConfig},
+        service_context::SpawnIndexerResult,
         test_utils::create_test_contract,
     };
-    use blueprint_sdk::{config::StdGadgetConfiguration, tokio};
+    use blueprint_sdk::{config::GadgetConfiguration, tokio};
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_spawn_multi_contract_indexer_local() {
         // Setup test environment
-        let context = ServiceContext::new(StdGadgetConfiguration::default(), PathBuf::from("."));
+        let context = ServiceContext::new(GadgetConfiguration::default(), PathBuf::from("."));
 
         // Create test contracts configuration using test utils
         let contracts = vec![
@@ -182,46 +86,30 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires kubernetes cluster"]
-    async fn test_kube_spawn_multi_contract_indexer() {
-        // Setup test environment
-        let mut context =
-            ServiceContext::new(StdGadgetConfiguration::default(), PathBuf::from("."));
-        context.deployment_mode = DeploymentMode::Kubernetes;
-        // Setup mock k8s client here...
+    async fn test_spawn_usdc_indexer() {
+        let context = ServiceContext::new(GadgetConfiguration::default(), PathBuf::from("."));
 
-        // Create test contracts configuration using test utils
-        let contracts = vec![
-            create_test_contract("Greeter", "1"), // Ethereum mainnet
-            create_test_contract("OptimismGreeter", "10"), // Optimism
-        ];
+        // USDC contract on Ethereum mainnet
+        let usdc_contract = ContractConfig {
+            name: "USDC".to_string(),
+            source: ContractSource::None,
+            deployments: vec![ContractDeployment {
+                network_id: "1".to_string(),
+                address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
+                rpc_url: "https://mainnet.infura.io/v3/".to_string(),
+                proxy_address: None,
+                start_block: None,
+            }],
+        };
 
-        let config = IndexerConfig::new("multi_network_test".to_string(), contracts);
+        let config = IndexerConfig::new("usdc_indexer_test".to_string(), vec![usdc_contract]);
         let params = SpawnIndexerParams { config };
         let params_bytes = serde_json::to_vec(&params).unwrap();
 
-        let result = spawn_indexer_kube(params_bytes, context).await.unwrap();
-        let results: Vec<EnvioIndexer> = serde_json::from_slice(&result).unwrap();
+        let result = spawn_indexer_local(params_bytes, context).await.unwrap();
+        let result: SpawnIndexerResult = serde_json::from_slice(&result).unwrap();
 
-        assert_eq!(results.len(), 3); // One for each contract
-        assert!(results[0]
-            .metadata
-            .name
-            .as_ref()
-            .unwrap()
-            .contains("greeter"));
-        assert!(results[1]
-            .metadata
-            .name
-            .as_ref()
-            .unwrap()
-            .contains("optimismgreeter"));
-        assert!(results[2]
-            .metadata
-            .name
-            .as_ref()
-            .unwrap()
-            .contains("arbitrumtoken"));
+        assert!(result.id.contains("usdc_indexer_test"));
     }
 
     #[tokio::test]

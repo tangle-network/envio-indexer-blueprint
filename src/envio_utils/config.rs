@@ -11,6 +11,7 @@ pub enum ContractSource {
     Explorer {
         api_url: String,
     },
+    None,
 }
 
 impl ContractSource {

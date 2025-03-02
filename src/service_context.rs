@@ -1,17 +1,15 @@
+use blueprint_sdk::config::GadgetConfiguration;
+use blueprint_sdk::macros::contexts::ServicesContext;
 use blueprint_sdk::macros::contexts::TangleClientContext;
 use blueprint_sdk::std::collections::HashMap;
 use blueprint_sdk::std::path::PathBuf;
 use blueprint_sdk::std::sync::Arc;
 use blueprint_sdk::tokio::process::Child;
 use blueprint_sdk::tokio::sync::RwLock;
-use blueprint_sdk::{config::StdGadgetConfiguration, macros::contexts::ServicesContext};
 use envio_utils::{EnvioManager, EnvioProject};
 use schemars::JsonSchema;
 
-use crate::{
-    envio_utils::{self, IndexerConfig},
-    kubernetes::K8sManager,
-};
+use crate::envio_utils::{self, IndexerConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,30 +45,27 @@ pub enum IndexerStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DeploymentMode {
     Local,
-    Kubernetes,
 }
 
 #[derive(Clone, ServicesContext, TangleClientContext)]
 pub struct ServiceContext {
     #[config]
-    pub config: StdGadgetConfiguration,
+    pub config: GadgetConfiguration,
     #[call_id]
     pub call_id: Option<u64>,
     pub indexers: Arc<RwLock<HashMap<String, IndexerProcess>>>,
     pub envio_manager: Arc<EnvioManager>,
     pub deployment_mode: DeploymentMode,
-    pub k8s_manager: Option<K8sManager>,
 }
 
 impl ServiceContext {
-    pub fn new(config: StdGadgetConfiguration, data_dir: PathBuf) -> Self {
+    pub fn new(config: GadgetConfiguration, data_dir: PathBuf) -> Self {
         Self {
             config,
             call_id: None,
             indexers: Arc::new(RwLock::new(HashMap::new())),
             envio_manager: Arc::new(EnvioManager::new(data_dir)),
             deployment_mode: DeploymentMode::Local,
-            k8s_manager: None,
         }
     }
 
