@@ -27,7 +27,7 @@ blueprint-sdk = { git = "https://github.com/tangle-network/gadget", features = [
 bytes = "1.8.0"
 reqwest = "0.12.9"
 wiremock = "0.6.2"
-fake = "3.0.1"
+fake = "4.0.0"
 rand = "0.8.5"
 regex = "1.11.1"
 anyhow = "1.0.93"
