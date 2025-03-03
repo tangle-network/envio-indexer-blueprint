@@ -21,7 +21,7 @@ serde = "1.0.215"
 lazy_static = "1.5.0"
 tempfile = "3.13"
 uuid = "1.11.0"
-thiserror = "2.0.3"
+thiserror = "2.0.12"
 schemars = "0.8"
 blueprint-sdk = { git = "https://github.com/tangle-network/gadget", features = ["tangle", "evm", "macros", "local-store"] }
 bytes = "1.8.0"
