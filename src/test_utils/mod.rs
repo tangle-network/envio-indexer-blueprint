@@ -1,4 +1,5 @@
 use crate::envio_utils::config::{ContractConfig, ContractDeployment, ContractSource};
+use crate::envio_utils::IndexerConfig;
 use fake::faker::address::en::CountryCode;
 use fake::faker::company::en::CompanyName;
 use fake::faker::internet::en::DomainSuffix;
@@ -161,6 +162,26 @@ pub fn generate_multi_address_contract(network_id: &str, num_addresses: usize) -
             .map(|_| create_deployment(network_id, None, None, None, None))
             .collect(),
     )
+}
+
+/// Create a USDC contract configuration for testing
+pub fn create_usdc_contract() -> IndexerConfig {
+    let contract = ContractConfig::new(
+        "USDC".to_string(),
+        ContractSource::Abi {
+            abi: Some(ERC20_ABI.to_string()),
+            url: None,
+        },
+        vec![ContractDeployment::new(
+            "1".to_string(), // Ethereum mainnet
+            "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            "https://eth-mainnet.g.alchemy.com/v2/demo".to_string(),
+            None,             // No proxy address
+            Some(10_000_000), // Start from a more recent block for testing
+        )],
+    );
+
+    IndexerConfig::new("usdc_indexer_test".to_string(), vec![contract])
 }
 
 // File verification utilities

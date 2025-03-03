@@ -11,7 +11,7 @@ pub enum ContractSource {
     Explorer {
         api_url: String,
     },
-    None,
+    Inferred,
 }
 
 impl ContractSource {
@@ -21,6 +21,10 @@ impl ContractSource {
 
     pub fn is_abi(&self) -> bool {
         matches!(self, ContractSource::Abi { .. })
+    }
+
+    pub fn is_inferred(&self) -> bool {
+        matches!(self, ContractSource::Inferred)
     }
 
     pub fn get_abi(&self) -> Option<String> {

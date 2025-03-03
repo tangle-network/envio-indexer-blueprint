@@ -3,3 +3,6 @@ pub mod jobs;
 pub mod network;
 pub mod service_context;
 pub mod test_utils;
+
+#[cfg(test)]
+mod tests;

@@ -1,9 +1,12 @@
 use super::config::{ContractConfig, ContractSource};
-use super::docker::EnvioDocker;
 use anyhow::Result;
 use blueprint_sdk::std::path::PathBuf;
+use blueprint_sdk::tokio;
 use blueprint_sdk::tokio::process::{Child, Command};
+use blueprint_sdk::tokio::sync::mpsc;
 use rexpect::spawn;
+use std::io::BufReader;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -36,7 +39,6 @@ impl From<EnvioError> for String {
 
 pub struct EnvioManager {
     base_dir: PathBuf,
-    docker: EnvioDocker,
 }
 
 #[derive(Debug)]
@@ -48,18 +50,7 @@ pub struct EnvioProject {
 
 impl EnvioManager {
     pub fn new(base_dir: PathBuf) -> Self {
-        Self {
-            base_dir,
-            docker: EnvioDocker::new(),
-        }
-    }
-
-    pub async fn start_docker(&mut self) -> Result<(), EnvioError> {
-        self.docker.start().await
-    }
-
-    pub async fn stop_docker(&mut self) -> Result<(), EnvioError> {
-        self.docker.stop().await
+        Self { base_dir }
     }
 
     pub async fn run_codegen(&self, project: &EnvioProject) -> Result<(), EnvioError> {
@@ -94,33 +85,157 @@ impl EnvioManager {
             ));
         }
 
+        // Spawn the process with piped output so we can capture logs
         let child = Command::new("envio")
             .arg("dev")
             .current_dir(&project.dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()?;
 
+        // Store the process
         project.process = Some(child);
+
+        // Wait a brief moment for process to start
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Verify process is running
+        if let Some(child) = project.process.as_mut() {
+            // try_wait requires a mutable reference in tokio
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() {
+                        return Err(EnvioError::ProcessFailed(format!(
+                            "Indexer process exited immediately with status: {:?}",
+                            status
+                        )));
+                    }
+                }
+                Err(e) => {
+                    return Err(EnvioError::Io(e));
+                }
+                _ => {} // Process still running
+            }
+        }
+
         Ok(())
     }
 
     pub async fn stop_dev(&self, project: &mut EnvioProject) -> Result<(), EnvioError> {
         if let Some(mut child) = project.process.take() {
-            child.kill().await?;
+            println!("Stopping indexer process...");
 
-            let status = Command::new("envio")
+            // First try to use envio stop command
+            let stop_result = Command::new("envio")
                 .arg("stop")
                 .current_dir(&project.dir)
                 .status()
-                .await?;
+                .await;
 
-            if !status.success() {
-                return Err(EnvioError::ProcessFailed(
-                    "Failed to stop indexer cleanly".into(),
-                ));
+            // Regardless of stop command result, ensure process is terminated
+            let kill_result = child.kill().await;
+
+            if let Err(e) = kill_result {
+                println!("Warning: Failed to kill process: {}", e);
+
+                // Kill by process ID as a fallback (if we can get it)
+                // The method call returns Option<u32> directly
+                if let Some(id) = child.id() {
+                    println!("Attempting fallback process termination for PID: {}", id);
+                    let _ = Command::new("kill")
+                        .arg("-9")
+                        .arg(id.to_string())
+                        .status()
+                        .await;
+                }
+            }
+
+            // Wait for the process to completely exit
+            let _ = child.wait().await;
+
+            // Log results of stop operation
+            match stop_result {
+                Ok(status) if status.success() => println!("Indexer stopped cleanly"),
+                Ok(status) => println!("Indexer stop command exited with: {:?}", status),
+                Err(e) => println!("Warning: Failed to run stop command: {}", e),
+            }
+        }
+
+        // Verify no lingering processes
+        self.cleanup_lingering_processes(project).await?;
+
+        Ok(())
+    }
+
+    // Add new method to find and clean up any lingering processes
+    async fn cleanup_lingering_processes(&self, project: &EnvioProject) -> Result<(), EnvioError> {
+        // Use ps to find any lingering envio processes related to this project
+        let output = Command::new("ps").arg("-ax").output().await?;
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+
+        // Look for processes that match the project directory
+        let project_dir_str = project.dir.to_string_lossy();
+        let dir_str = project_dir_str.to_string(); // Convert to String for contains check
+
+        for line in output_str.lines() {
+            if line.contains("envio") && line.contains(&dir_str) {
+                // Extract PID (first column in ps output)
+                if let Some(pid) = line.split_whitespace().next() {
+                    if let Ok(pid) = pid.parse::<u32>() {
+                        println!("Killing lingering process: {} - {}", pid, line);
+                        let _ = Command::new("kill")
+                            .arg("-9")
+                            .arg(pid.to_string())
+                            .status()
+                            .await;
+                    }
+                }
             }
         }
 
         Ok(())
+    }
+
+    // New method to monitor indexer progress
+    pub async fn monitor_indexer(
+        &self,
+        project: &EnvioProject,
+    ) -> Result<IndexerStatus, EnvioError> {
+        // For monitoring, we'll need to make a temporary copy since we can't modify the passed reference
+        if let Some(ref process) = project.process {
+            // Since we can't get a mutable reference, we'll use a different approach
+            // Check if the process exists with ps command
+            let output = Command::new("ps")
+                .arg("-p")
+                .arg(process.id().map(|id| id.to_string()).unwrap_or_default())
+                .output()
+                .await?;
+
+            // If exit status is non-zero, process doesn't exist
+            if !output.status.success() {
+                return Ok(IndexerStatus::Stopped);
+            }
+
+            // Process exists, check GraphQL endpoint for health
+            let client = reqwest::Client::new();
+            match client
+                .get("http://localhost:8080/health")
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => {
+                    return Ok(IndexerStatus::Running);
+                }
+                _ => {
+                    // Still starting up
+                    return Ok(IndexerStatus::Starting);
+                }
+            }
+        }
+
+        Ok(IndexerStatus::Stopped)
     }
 
     pub async fn init_project(
@@ -143,18 +258,30 @@ impl EnvioManager {
 
         // Get ABI for each contract and write to file
         for contract in contracts.iter() {
-            let abi = self.get_abi(contract).await?;
-            let abi_path = abis_dir.join(format!("{}_abi.json", contract.name));
-            println!("Writing {:?}, ABI to file: {:?}", contract.name, abi_path);
-            std::fs::write(&abi_path, abi)?;
+            match self.get_abi(contract).await {
+                Ok(abi) => {
+                    let abi_path = abis_dir.join(format!("{}_abi.json", contract.name));
+                    println!("Writing {:?}, ABI to file: {:?}", contract.name, abi_path);
+                    std::fs::write(&abi_path, abi)?;
+                }
+                Err(_) => {
+                    continue;
+                }
+            }
         }
+
+        let is_first_contract_inferred = contracts[0].source.is_inferred();
 
         // Clone the values needed for the blocking task
         let project_dir_clone = project_dir.clone();
 
         std::env::set_current_dir(&project_dir_clone)?;
 
-        let mut session = spawn("envio init contract-import local", Some(2000))?;
+        let mut session = if is_first_contract_inferred {
+            spawn("envio init", Some(2000))?
+        } else {
+            spawn("envio init contract-import local", Some(2000))?
+        };
         // session.send_line("envio init contract-import local")?;
 
         let mut current_contract_idx = 0;
@@ -307,6 +434,11 @@ impl EnvioManager {
                 println!("Handling language selection");
                 session.send_control('m')?;
             }
+            s if s.contains("Choose blockchain ecosystem") => {
+                println!("Handling blockchain ecosystem selection");
+                // EVM and Fuel are options but for now we only support EVM
+                session.send_control('m')?;
+            }
             s if s.contains("Which events would you like to index?")
                 || (s.contains("space to select one") && s.contains("type to filter")) =>
             {
@@ -325,7 +457,7 @@ impl EnvioManager {
                 println!("Handling block explorer vs local ABI prompt");
                 let contract = &contracts[*current_contract_idx];
 
-                if contract.source.is_explorer() {
+                if contract.source.is_explorer() || contract.source.is_inferred() {
                     // For block explorer, just hit enter
                     session.send_control('m')?;
                 } else {
@@ -470,7 +602,66 @@ impl EnvioManager {
 
                 fetch_abi_from_url(&api_url).await
             }
+            ContractSource::Inferred => Err(EnvioError::InvalidState(
+                "No ABI source provided, it is inferred from the contract address and network"
+                    .to_string(),
+            )),
         }
+    }
+
+    /// Subscribe to log messages from a running indexer process
+    /// Returns a receiver channel that will receive log messages
+    pub fn subscribe_to_logs(
+        &self,
+        project: &mut EnvioProject,
+    ) -> Result<mpsc::Receiver<IndexerLogMessage>, EnvioError> {
+        // Create a channel for sending log messages
+        let (tx, rx) = mpsc::channel::<IndexerLogMessage>(100);
+
+        if let Some(child) = &mut project.process {
+            // Take ownership of stdout and stderr
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+
+            if let Some(stdout) = stdout {
+                let tx_clone = tx.clone();
+
+                // Use tokio's async io
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncBufReadExt, BufReader};
+                    let reader = BufReader::new(stdout);
+                    let mut lines = reader.lines();
+
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let _ = tx_clone.send(IndexerLogMessage::Stdout(line.clone())).await;
+
+                        // Try to parse progress information
+                        if let Some(progress) = parse_progress_from_log(&line) {
+                            let _ = tx_clone.send(IndexerLogMessage::Progress(progress)).await;
+                        }
+                    }
+                });
+            }
+
+            if let Some(stderr) = stderr {
+                let tx_clone = tx.clone();
+
+                // Use tokio's async io
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncBufReadExt, BufReader};
+                    let reader = BufReader::new(stderr);
+                    let mut lines = reader.lines();
+
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let _ = tx_clone.send(IndexerLogMessage::Stderr(line)).await;
+                    }
+                });
+            }
+        } else {
+            return Err(EnvioError::InvalidState("No process running".into()));
+        }
+
+        Ok(rx)
     }
 }
 
@@ -483,62 +674,126 @@ async fn fetch_abi_from_url(url: &str) -> Result<String, EnvioError> {
         .map_err(|e| EnvioError::ProcessFailed(format!("Failed to read ABI response: {}", e)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_utils::create_test_contract;
-    use blueprint_sdk::tokio;
+/// Types of log messages from an indexer
+#[derive(Debug, Clone)]
+pub enum IndexerLogMessage {
+    /// Standard output message
+    Stdout(String),
+    /// Standard error message
+    Stderr(String),
+    /// Parsed progress information
+    Progress(IndexerProgress),
+}
 
-    #[tokio::test]
-    async fn test_project_lifecycle() {
-        let temp_dir = std::env::current_dir().unwrap();
-        let mut manager = EnvioManager::new(temp_dir.as_path().to_path_buf());
+#[derive(Debug, Clone)]
+pub enum IndexerStatus {
+    Configured,
+    Starting,
+    Running,
+    Failed(String),
+    Stopped,
+}
 
-        // Start Docker dependencies
-        manager.start_docker().await.unwrap();
+#[derive(Debug, Clone, Default)]
+pub struct IndexerProgress {
+    pub events_processed: Option<usize>,
+    pub blocks_current: Option<usize>,
+    pub blocks_total: Option<usize>,
+    pub chain_id: Option<String>,
+    pub percentage: Option<usize>,
+    pub eta: Option<String>,
+}
 
-        // Create test contract using test utils
-        let contract = create_test_contract("TestContract", "1");
+impl From<IndexerStatus> for String {
+    fn from(status: IndexerStatus) -> Self {
+        match status {
+            IndexerStatus::Configured => "Configured".to_string(),
+            IndexerStatus::Starting => "Starting".to_string(),
+            IndexerStatus::Running => "Running".to_string(),
+            IndexerStatus::Failed(reason) => format!("Failed: {}", reason),
+            IndexerStatus::Stopped => "Stopped".to_string(),
+        }
+    }
+}
 
-        // Test project initialization
-        let mut project = manager
-            .init_project("test_project", vec![contract])
-            .await
-            .unwrap();
+/// Parse progress information from a log line
+fn parse_progress_from_log(line: &str) -> Option<IndexerProgress> {
+    let mut progress = IndexerProgress::default();
 
-        // Verify project structure
-        assert!(project.dir.exists());
-        assert!(
-            project.dir.join("config.yaml").exists(),
-            "config.yaml should exist after initialization"
-        );
-        assert!(
-            project.dir.join("abis").exists(),
-            "abis directory should exist"
-        );
+    // Parse events processed
+    if let Some(events_idx) = line.find("Events Processed:") {
+        if let Some(end_idx) = line[events_idx..].find("blocks:") {
+            let events_str =
+                line[events_idx + "Events Processed:".len()..events_idx + end_idx].trim();
+            // Remove commas and parse
+            let events_str = events_str.replace(',', "");
+            if let Ok(events) = events_str.parse::<usize>() {
+                progress.events_processed = Some(events);
+            }
+        }
+    }
 
-        // Test codegen
-        manager.run_codegen(&project).await.unwrap();
+    // Parse block information
+    if let Some(blocks_idx) = line.find("blocks:") {
+        let blocks_part = &line[blocks_idx + "blocks:".len()..];
 
-        // Verify generated files exist
-        assert!(
-            project.dir.join("src").exists(),
-            "src directory should exist after codegen"
-        );
+        // Find current blocks
+        if let Some(slash_idx) = blocks_part.find('/') {
+            let current_str = blocks_part[..slash_idx].trim();
+            let current_str = current_str.replace(',', "");
+            if let Ok(current) = current_str.parse::<usize>() {
+                progress.blocks_current = Some(current);
+            }
 
-        // Test dev mode
-        manager.start_dev(&mut project).await.unwrap();
-        assert!(project.process.is_some());
+            // Find total blocks
+            let remaining = &blocks_part[slash_idx + 1..];
+            if let Some(end_idx) = remaining.find(|c: char| c.is_whitespace()) {
+                let total_str = &remaining[..end_idx].trim();
+                let total_str = total_str.replace(',', "");
+                if let Ok(total) = total_str.parse::<usize>() {
+                    progress.blocks_total = Some(total);
+                }
+            }
+        }
+    }
 
-        // Test stopping
-        manager.stop_dev(&mut project).await.unwrap();
-        assert!(project.process.is_none());
+    // Parse chain ID
+    if let Some(chain_idx) = line.find("Chain ID:") {
+        let chain_part = &line[chain_idx + "Chain ID:".len()..];
+        if let Some(end_idx) = chain_part.find('%') {
+            let chain_id = chain_part[..end_idx].trim();
+            progress.chain_id = Some(chain_id.to_string());
 
-        // Clean up
-        manager.stop_docker().await.unwrap();
+            // Also extract percentage
+            if let Some(pct) = chain_part[..end_idx]
+                .trim()
+                .find(|c: char| c.is_ascii_digit())
+            {
+                let pct_str = &chain_part[pct..end_idx].trim();
+                if let Ok(percentage) = pct_str.parse::<usize>() {
+                    progress.percentage = Some(percentage);
+                }
+            }
+        }
+    }
 
-        // Clean up project directory
-        std::fs::remove_dir_all(&project.dir).unwrap();
-        assert!(!project.dir.exists(), "Project directory should be removed");
+    // Parse ETA
+    if let Some(eta_idx) = line.find("Sync Time ETA:") {
+        let eta_part = &line[eta_idx + "Sync Time ETA:".len()..];
+        if let Some(end_idx) = eta_part.find('(') {
+            let eta = eta_part[..end_idx].trim();
+            progress.eta = Some(eta.to_string());
+        }
+    }
+
+    // Only return Some if we parsed at least one field
+    if progress.events_processed.is_some()
+        || progress.blocks_current.is_some()
+        || progress.chain_id.is_some()
+        || progress.eta.is_some()
+    {
+        Some(progress)
+    } else {
+        None
     }
 }
