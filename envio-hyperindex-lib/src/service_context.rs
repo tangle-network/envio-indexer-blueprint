@@ -1,22 +1,20 @@
 use crate::envio_utils::project::IndexerProgress;
 use crate::envio_utils::project::IndexerStatus;
-use crate::envio_utils::{self, EnvioManager, EnvioProject, IndexerConfig, IndexerLogMessage};
-use blueprint_sdk::config::GadgetConfiguration;
-use blueprint_sdk::macros::contexts::ServicesContext;
-use blueprint_sdk::macros::contexts::TangleClientContext;
+use crate::envio_utils::{EnvioManager, EnvioProject, IndexerConfig, IndexerLogMessage};
+use blueprint_sdk::macros::context::ServicesContext;
+use blueprint_sdk::macros::context::TangleClientContext;
+use blueprint_sdk::runner::config::BlueprintEnvironment;
 use blueprint_sdk::std::collections::HashMap;
 use blueprint_sdk::std::path::PathBuf;
 use blueprint_sdk::std::sync::Arc;
 use blueprint_sdk::tokio;
 use blueprint_sdk::tokio::process::Child;
+use blueprint_sdk::tokio::sync::mpsc;
 use blueprint_sdk::tokio::sync::RwLock;
 use schemars::JsonSchema;
-
-use blueprint_sdk::tokio::sync::mpsc;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct SpawnIndexerParams {
     pub config: IndexerConfig,
 }
@@ -47,7 +45,7 @@ pub enum DeploymentMode {
 #[derive(Clone, ServicesContext, TangleClientContext)]
 pub struct ServiceContext {
     #[config]
-    pub config: GadgetConfiguration,
+    pub config: BlueprintEnvironment,
     #[call_id]
     pub call_id: Option<u64>,
     pub indexers: Arc<RwLock<HashMap<String, IndexerProcess>>>,
@@ -56,7 +54,7 @@ pub struct ServiceContext {
 }
 
 impl ServiceContext {
-    pub fn new(config: GadgetConfiguration, data_dir: PathBuf) -> Self {
+    pub fn new(config: BlueprintEnvironment, data_dir: PathBuf) -> Self {
         Self {
             config,
             call_id: None,
@@ -271,16 +269,6 @@ impl ServiceContext {
 
     pub fn get_indexers(&self) -> &Arc<RwLock<HashMap<String, IndexerProcess>>> {
         &self.indexers
-    }
-
-    /// Create a new service context for testing
-    pub async fn new_test() -> Self {
-        let config = GadgetConfiguration::default();
-        let test_dir = std::env::temp_dir().join(format!("envio_test_{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&test_dir).expect("Failed to create test directory");
-
-        println!("Created test directory at: {:?}", test_dir);
-        Self::new(config, test_dir)
     }
 
     /// Subscribe to logs from a specific indexer

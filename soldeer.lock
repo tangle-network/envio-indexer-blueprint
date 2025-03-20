@@ -1,6 +1,5 @@
-
 [[dependencies]]
 name = "tnt-core"
 version = "0.1.0"
-source = "https://github.com/tangle-network/tnt-core.git"
-checksum = "07f3925e3d2197dd78a73104255ec896a6a074ca"
+git = "https://github.com/tangle-network/tnt-core.git"
+rev = "10432a104589d510347eb1b4b471ac8ea2d1ec99"

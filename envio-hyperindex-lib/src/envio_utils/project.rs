@@ -5,8 +5,6 @@ use blueprint_sdk::tokio;
 use blueprint_sdk::tokio::process::{Child, Command};
 use blueprint_sdk::tokio::sync::mpsc;
 use rexpect::spawn;
-use std::io::BufReader;
-use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

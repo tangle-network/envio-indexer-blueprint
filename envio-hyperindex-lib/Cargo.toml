@@ -1,0 +1,46 @@
+[package]
+name = "envio-hyperindex-lib"
+version = "0.1.0"
+edition = "2021"
+description = "A Tangle Blueprint for running envio indexers"
+authors = ["Drew Stone <drewstone329@gmail.com>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://tangle.tools"
+repository = "https://github.com/tangle-network/envio-hyperindex-blueprint"
+readme = "README.md"
+categories = ["cryptography", "cryptography::cryptocurrencies"]
+keywords = ["tangle", "blueprint", "avs"]
+rust-version = "1.81"
+
+[dependencies]
+blueprint-sdk = { workspace = true }
+async-trait = { workspace = true }
+color-eyre = { workspace = true }
+structopt = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+lazy_static = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+schemars = { workspace = true }
+bytes = { workspace = true }
+reqwest = { workspace = true }
+wiremock = { workspace = true }
+fake = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+anyhow = { workspace = true }
+rexpect = { workspace = true }
+bollard = { workspace = true }
+futures = { workspace = true }
+testcontainers = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+rustls = { workspace = true }
+aws-lc-rs = { workspace = true }
+tower-test = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }

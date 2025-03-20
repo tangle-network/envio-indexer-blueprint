@@ -3,9 +3,11 @@ use crate::{
     envio_utils::{project::IndexerStatus, IndexerConfig},
     jobs::spawn_indexer_local,
     service_context::{ServiceContext, SpawnIndexerParams, SpawnIndexerResult},
-    test_utils::{create_test_contract, create_usdc_contract},
+    test_utils::create_test_contract,
 };
-use blueprint_sdk::{config::GadgetConfiguration, tokio};
+use blueprint_sdk::{
+    extract::Context, runner::config::BlueprintEnvironment, tangle::extract::TangleArg, tokio,
+};
 use std::{path::PathBuf, time::Duration};
 
 // Add a helper for test cleanup
@@ -48,7 +50,7 @@ impl Drop for TestCleanup {
 #[tokio::test]
 async fn test_spawn_multi_contract_indexer_local() {
     // Setup test environment
-    let context = ServiceContext::new(GadgetConfiguration::default(), PathBuf::from("."));
+    let context = ServiceContext::new(BlueprintEnvironment::default(), PathBuf::from("."));
     let mut cleanup = TestCleanup::new(context.clone());
 
     // Create test contracts configuration using test utils
@@ -59,11 +61,12 @@ async fn test_spawn_multi_contract_indexer_local() {
 
     let config = IndexerConfig::new("multi_network_test".to_string(), contracts);
     let params = SpawnIndexerParams { config };
-    let params_bytes = serde_json::to_vec(&params).unwrap();
 
     // Test local indexer spawn
-    let result = spawn_indexer_local(params_bytes, context).await.unwrap();
-    let result: SpawnIndexerResult = serde_json::from_slice(&result).unwrap();
+    let result = spawn_indexer_local(Context(context.clone()), TangleArg(params))
+        .await
+        .unwrap();
+    let result: SpawnIndexerResult = serde_json::from_slice(&result.0).unwrap();
 
     // Register for cleanup
     cleanup.set_indexer_id(result.id.clone());
@@ -73,22 +76,19 @@ async fn test_spawn_multi_contract_indexer_local() {
 
 #[tokio::test]
 async fn test_spawn_usdc_indexer() {
-    use crate::envio_utils::IndexerLogMessage;
-
-    let context = ServiceContext::new(GadgetConfiguration::default(), PathBuf::from("."));
+    let context = ServiceContext::new(BlueprintEnvironment::default(), PathBuf::from("."));
     let mut cleanup = TestCleanup::new(context.clone());
 
     let config = test_utils::create_usdc_contract();
     println!("Running USDC indexer test...");
 
     let params = SpawnIndexerParams { config };
-    let params_bytes = serde_json::to_vec(&params).unwrap();
 
     // Test local indexer spawn
-    let result = spawn_indexer_local(params_bytes, context.clone())
+    let result = spawn_indexer_local(Context(context.clone()), TangleArg(params))
         .await
         .unwrap();
-    let result: SpawnIndexerResult = serde_json::from_slice(&result).unwrap();
+    let result: SpawnIndexerResult = serde_json::from_slice(&result.0).unwrap();
 
     // Register for cleanup
     cleanup.set_indexer_id(result.id.clone());

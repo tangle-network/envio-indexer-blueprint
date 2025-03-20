@@ -1,18 +1,32 @@
-[package]
-name = "envio-hyperindex-blueprint"
+[workspace]
+resolver = "2"
+members = ["envio-hyperindex-lib", "envio-hyperindex-bin"]
+
+[workspace.package]
 version = "0.1.0"
-edition = "2021"
-description = "A Tangle Blueprint for running envio indexers"
-authors = ["Drew Stone <drewstone329@gmail.com>"]
+description = "A Tangle Network demonstrating a secure code execution FaaS platform"
+edition = "2024"
+authors = ["Tangle Network"]
 license = "MIT OR Apache-2.0"
 homepage = "https://tangle.tools"
 repository = "https://github.com/tangle-network/envio-hyperindex-blueprint"
 readme = "README.md"
 categories = ["cryptography", "cryptography::cryptocurrencies"]
 keywords = ["tangle", "blueprint", "avs"]
-rust-version = "1.81"
 
-[dependencies]
+[workspace.dependencies]
+envio-hyperindex-lib = { path = "envio-hyperindex-lib" }
+blueprint-sdk = { git = "https://github.com/tangle-network/blueprint", features = [
+    "std",
+    "tangle",
+    "macros",
+    "local-store",
+] }
+
+tokio = { version = "1.41.1", features = ["rt-multi-thread"] }
+tower = { version = "0.5.0", features = ["filter"] }
+tracing = { version = "0.1.41" }
+tracing-subscriber = { version = "0.3.1", features = ["env-filter"] }
 async-trait = "0.1"
 color-eyre = "0.6"
 structopt = "0.3.26"
@@ -23,7 +37,6 @@ tempfile = "3.13"
 uuid = "1.11.0"
 thiserror = "2.0.3"
 schemars = "0.8"
-blueprint-sdk = { git = "https://github.com/tangle-network/gadget", features = ["tangle", "evm", "macros", "local-store"] }
 bytes = "1.8.0"
 reqwest = "0.12.9"
 wiremock = "0.6.2"
@@ -36,37 +49,9 @@ bollard = "0.17"
 futures = "0.3.31"
 testcontainers = "0.23.0"
 chrono = "0.4.39"
-
-[dev-dependencies]
 rustls = { version = "0.23.17", features = ["aws_lc_rs"] }
 aws-lc-rs = "1.11.0"
 tower-test = "0.4.0"
 http = "1.1.0"
 http-body-util = "0.1.2"
 hyper = "1.5.1"
-
-[build-dependencies]
-blueprint-metadata = "0.1.6"
-
-[features]
-default = ["std"]
-std = ["blueprint-sdk/std"]
-
-[lib]
-path = "src/lib.rs"
-
-[[bin]]
-name = "envio-hyperindex-blueprint"
-path = "src/main.rs"
-
-[package.metadata.blueprint]
-manager = { Evm = "HelloBlueprint" }
-
-[[package.metadata.gadget.Native.sources]]
-owner = "tangle-network"
-repo = "envio-hyperindex-blueprint"
-tag = "0.1.0"
-binaries = [
-    { arch = "Amd64", os = "Linux", name = "amd64-linux-envio-hyperindex-blueprint-gadget" },
-    { arch = "Arm64", os = "Linux", name = "arm64-linux-envio-hyperindex-blueprint-gadget" },
-]
