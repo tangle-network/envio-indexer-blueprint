@@ -50,7 +50,7 @@ futures = "0.3.31"
 testcontainers = "0.23.0"
 chrono = "0.4.39"
 rustls = { version = "0.23.17", features = ["aws_lc_rs"] }
-aws-lc-rs = "1.11.0"
+aws-lc-rs = "1.13.0"
 tower-test = "0.4.0"
 http = "1.1.0"
 http-body-util = "0.1.2"
