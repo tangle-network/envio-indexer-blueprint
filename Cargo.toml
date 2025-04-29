@@ -48,7 +48,7 @@ rexpect = "0.6.0"
 bollard = "0.17"
 futures = "0.3.31"
 testcontainers = "0.23.0"
-chrono = "0.4.39"
+chrono = "0.4.41"
 rustls = { version = "0.23.17", features = ["aws_lc_rs"] }
 aws-lc-rs = "1.11.0"
 tower-test = "0.4.0"
